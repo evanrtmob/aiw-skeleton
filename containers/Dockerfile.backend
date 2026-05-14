@@ -4,14 +4,14 @@ COPY ./backend/package*.json ./
 
 FROM base AS development
 WORKDIR /code
-RUN npm install -g nodemon
-RUN npm install dotenv
+COPY ./backend/package*.json ./
+RUN npm install -g nodemon ts-node
 RUN npm install
 RUN mkdir app
 COPY ./backend/config.cfg ./app
 COPY ./backend .
 EXPOSE 3001
-CMD ["npm", "run", "dev"]
+CMD ["nodemon", "--watch", "scr", "--ext", "ts", "--exec", "ts-node", "scr/index.ts"]
 
 FROM base AS builder
 RUN npm install

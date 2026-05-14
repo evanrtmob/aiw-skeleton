@@ -19,13 +19,12 @@ services:
       target: development
     volumes:
       - ./backend/scr:/code/scr
-      - ./backend/dist:/code/dist
-      - backend_node_modules:/code/node_modules
+      - ./backend/config.cfg:/code/app/config.cfg
     environment:
       NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "53000:3001"
 
 volumes:
   frontend_node_modules:
-  backend_node_modules:
