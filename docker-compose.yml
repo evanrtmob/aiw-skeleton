@@ -1,0 +1,44 @@
+services:
+  nginx:
+    container_name: 'aiw-nginx'
+    image: nginx:1.25-alpine
+    volumes:
+      - ./nginx/conf.d/default.prod.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - aiw
+    restart: unless-stopped
+
+  frontend:
+    container_name: 'aiw-frontend'
+    build:
+      context: ./
+      dockerfile: ./containers/Dockerfile.frontend
+      target: production
+    networks:
+      - aiw
+    restart: unless-stopped
+
+  backend:
+    container_name: 'aiw-backend'
+    build:
+      context: ./
+      dockerfile: ./containers/Dockerfile.backend
+      target: production
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    networks:
+      - aiw
+    restart: unless-stopped
+
+networks:
+  aiw:
+    driver: bridge

@@ -1,0 +1,9 @@
+./.data/backend/*
+./.data/frontend/*
+/frontend
+/backend
+.env
+init.sh
+down.sh
+.claude
+CLAUDE.md
