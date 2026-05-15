@@ -17,8 +17,6 @@ services:
       context: ./
       dockerfile: ./containers/Dockerfile.frontend
       target: production
-    environment:
-      NODE_ENV: production
     networks:
       - aiw
     restart: unless-stopped

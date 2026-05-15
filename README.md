@@ -1,71 +1,105 @@
-# AIW Skeleton
+# AppInWhats
 
-## Requisitos
+B2B sales management platform built around WhatsApp integration. Manages agents, clients, orders, products, conversations, and a public web catalog with an AI chat module.
 
-- Docker + Docker Compose
+**Stack:** Angular 16 · Express/TypeScript · MySQL · Nginx · Docker
 
-## Primeros pasos
+---
 
-1. Clonar el repositorio
-2. Agregar el código de la aplicación:
-   - Proyecto Angular → `frontend/`
-   - Proyecto Express → `backend/scr/`
-3. Actualizar el directorio de salida de Angular en `containers/Dockerfile.frontend` (`dist/AiW`)
-4. Copiar `.env.example` a `.env` y completar los valores (requerido en producción)
-5. Iniciar con ```docker compose up```, Bash o Powershell:
-```bash
-./init.sh
+## Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows)
+- PowerShell 7+
+
+---
+
+## Development
+
+### First time (or after `package.json` / Dockerfile changes)
+
+```powershell
+.\build.ps1
 ```
 
-App disponible en `http://localhost:{{FRONTEND_PORT}}`.
+Wipes volumes, removes images, and rebuilds. Run once before starting.
 
-## Estructura del proyecto
+### Start
 
-```
-├── backend/
-│   └── scr/              # Express Backend
-├── frontend/             # Frontend
-├── nginx/conf.d/
-│   ├── default.dev.conf  # Config proxy dev
-│   └── default.prod.conf # Config proxy prod
-├── containers/
-│   ├── Dockerfile.backend
-│   └── Dockerfile.frontend
-├── docker-compose.yml            # Config base (target producción)
-├── docker-compose.override.yml   # Overrides dev (se aplica automáticamente - se usa por defecto para desarrollo)
-├── docker-compose.prod.yml       # Overrides de puertos y nginx para prod
-├── init.sh    # docker compose up
-└── down.sh    # Detiene y elimina contenedores, imágenes y .data/
+```powershell
+.\start.ps1          # Local mode  — frontend + local backend
+.\start.ps1 -Remote  # Remote mode — frontend + desarrollo.appinwhats.com backend
 ```
 
-## Flujo de desarrollo
+| Service | URL |
+|---|---|
+| App (via Nginx) | http://localhost:50080 |
+| Backend (direct) | http://localhost:53000 *(local mode only)* |
 
-```bash
-./init.sh      # Inicia todos los contenedores con hot reload
-./down.sh      # Detiene, elimina contenedores/imágenes, limpia .data/
-./init_prod.sh # Hace el build de los proyectos(back y front) e inicia los contenedores
+**Hot reload** is enabled for both frontend (`frontend/src/`) and backend (`backend/scr/`). Changes are picked up automatically — no host compilation needed.
+
+### Mode switching
+
+`environment.ts` is permanently set to `localhost:50080` — never edit it. Nginx is the switch:
+
+- **Local mode:** `/api/*` → local backend container
+- **Remote mode:** `/api/*` → `https://desarrollo.appinwhats.com` (local backend not started)
+
+In remote mode, the app runs your local frontend code but all API calls go to the remote server. `/files/`, `/integration/`, and `/aiw/` also proxy to the remote server in both modes.
+
+---
+
+## Architecture
+
+```
+nginx:50080
+  /api/*          → backend:3001
+  /files/*        → desarrollo.appinwhats.com/files/
+  /integration/*  → desarrollo.appinwhats.com/integration/
+  /aiw/*          → desarrollo.appinwhats.com/aiw/
+  /*              → frontend:4200
 ```
 
-- **Backend** recarga automáticamente vía `ts-node` observando `backend/scr/` (montado como volumen)
-- **Frontend** recarga automáticamente vía `ng serve --poll 500`
-- Backend accesible directamente en `http://localhost:{{FRONTEND_PORT}}` (sin pasar por nginx)
+### Backend (`backend/scr/`)
 
+Express server with the pattern: **routes → controllers → services → db**
 
-Desplegar con:
-```bash
-./init_prod.sh
+- `db/connection.ts` — mysql2 connection pool
+- `keys.ts` — reads credentials from `backend/config.cfg` (not env vars)
+- `models/server.ts` — app bootstrap, CORS config, route registration
+
+### Frontend (`frontend/src/app/`)
+
+Angular 16 SPA with lazy-loaded modules:
+
+| Module | Route |
+|---|---|
+| Dashboard | `/appinwhats/dashboard` |
+| Clients | `/appinwhats/clientes` |
+| Agents | `/appinwhats/agentes` |
+| Conversations | `/appinwhats/conversations` |
+| Products | `/appinwhats/products` |
+| Sales | `/appinwhats/sales` |
+| Configuration | `/appinwhats/configuration` |
+| Catalog *(public)* | `/catalogo/:token` |
+
+---
+
+## Production build
+
+```powershell
+.\prod-build.ps1
 ```
 
-O manualmente:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+Compiles frontend (`ng build`) and backend (`tsc`) inside Docker builder stages, copies the output to `frontend/dist/` and `backend/dist/`, then rebuilds production images. After it finishes, commit both `dist/` folders and push.
+
+---
+
+## Configuration
+
+`backend/config.cfg` holds DB credentials and is mounted as a volume. Changes take effect after:
+
+```powershell
+docker compose restart backend
 ```
 
-## Enrutamiento nginx
-
-| Ruta | Destino |
-|------|---------|
-| `/api/*` | Backend (puerto 3001 dev / 3000 prod) |
-| `/*` | Frontend |
-
-CORS es manejado por nginx — no configurar en Express.
+No rebuild required.
