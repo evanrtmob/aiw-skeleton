@@ -1,0 +1,52 @@
+# Overrides de rendimiento para desarrollo.
+# Se aplica SIEMPRE al final para que sus valores ganen sobre el resto de ficheros.
+# Reduce CPU (menos polling), acota RAM/CPU por contenedor y limita el tamano de logs.
+services:
+  nginx:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  frontend:
+    # Polling mas espaciado: detecta cambios igual pero consume mucha menos CPU.
+    command: ["npx", "ng", "serve", "--host", "0.0.0.0", "--poll", "2500"]
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "2500"
+      NG_CLI_ANALYTICS: "false"
+      # Cota de memoria del proceso Node de Angular (evita picos que ahogan el PC).
+      NODE_OPTIONS: "--max-old-space-size=1536"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  backend:
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "1500"
+      NODE_OPTIONS: "--max-old-space-size=768"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
