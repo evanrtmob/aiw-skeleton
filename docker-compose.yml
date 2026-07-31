@@ -16,7 +16,7 @@ services:
     build:
       context: ./
       dockerfile: ./containers/Dockerfile.frontend
-      target: production
+      target: development
     networks:
       - aiw
     restart: unless-stopped

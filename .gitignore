@@ -3,6 +3,7 @@
 /frontend
 /backend
 .env
+.aiw-launcher-session
 CLAUDE.md
 GUIA.md
 /docs

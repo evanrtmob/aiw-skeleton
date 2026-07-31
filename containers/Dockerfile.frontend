@@ -7,7 +7,7 @@ RUN npm install -g @angular/cli
 RUN npm ci --legacy-peer-deps
 COPY ./frontend .
 EXPOSE 4200
-CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--poll", "500"]
+CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--poll", "2500"]
 
 FROM base AS builder
 RUN npm ci --legacy-peer-deps

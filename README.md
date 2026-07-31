@@ -53,12 +53,20 @@ Runs `docker compose down -v --rmi all` to stop containers, wipe named volumes, 
 ### 3. Start
 
 ```powershell
+.\AppInWhats-Launcher.exe   # GUI: native / docker / remote / optimized / install
 .\start.ps1          # Local mode  — local frontend + local backend
 .\start.ps1 -Remote  # Remote mode — local frontend + remote backend
+.\start-optimized.ps1 [-Remote]  # Igual, con límites CPU/RAM y menos polling
+.\start-native.ps1 [-Remote] [-Install]  # Sin Docker: Node en el host (mucho más ligero)
 ```
+
+Si falta el `.exe`, compílalo una vez: `.\launcher\build-launcher.ps1` (usa el `csc` de Windows, sin Visual Studio).
+
+El launcher integra las terminales (frontend / backend en paneles) y el botón **Parar todo**.
 
 - **Local:** runs `docker compose up` using `docker-compose.yml` + `docker-compose.override.yml`. Both frontend and backend containers start.
 - **Remote:** runs `docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.remote.yml up --scale backend=0`. The `docker-compose.remote.yml` override swaps the Nginx config volume to point at `default.dev.remote.conf`, and `--scale backend=0` skips starting the local backend container entirely.
+- **Native:** no Docker/nginx. Angular `ng serve` en `:50080` con `proxy.conf.native*.json` (`/api`, `/files`, `/aiw`, `/integration`). Backend con `ts-node` en `:3001` salvo `-Remote`. Todo en la misma terminal; `Ctrl+C` para parar.
 
 | Service | URL | Notes |
 |---|---|---|
