@@ -1,0 +1,9 @@
+{
+  "host": "217.160.205.6",
+  "port": 22,
+  "user": "root",
+  "password": "TU_PASSWORD_AQUI",
+  "remoteRoot": "/root/appinwhats",
+  "frontendPort": 1231,
+  "backendPort": 3001
+}

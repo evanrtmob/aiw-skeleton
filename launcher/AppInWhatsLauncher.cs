@@ -79,8 +79,15 @@ namespace AppInWhats
         CaptionButton _capClose;
         Panel _homePanel;
         Panel _homeContent;
+        Panel _homeScrollHost;
+        Panel _homeViewport;
         Panel _tileGrid;
-        readonly List<Control> _homeTiles = new List<Control>();
+        ModernVScrollBar _homeScrollBar;
+        readonly List<HomeSection> _homeSections = new List<HomeSection>();
+        string _homeLayoutPath;
+        HomeSection _dragSection;
+        bool _draggingSection;
+        int _dragOffsetY;
         Panel _resumeBanner;
         Label _resumeLabel;
         Panel _sessionPanel;
@@ -96,6 +103,12 @@ namespace AppInWhats
         RoundedButton _btnHome;
         RoundedButton _btnOpen;
         RoundedButton _btnBuild;
+        RoundedButton _btnSyncBack;
+        RoundedButton _btnSyncFront;
+        RoundedButton _btnSyncBoth;
+        Panel _serverBar;
+        string _serverAppUrl = "http://217.160.205.6:1231";
+        bool _openDistAfterBuild;
         Process _buildProc;
         Panel _statsBar;
         StatsChip _statsBack;
@@ -110,6 +123,7 @@ namespace AppInWhats
         {
             _root = ResolveRoot();
             _sessionPath = Path.Combine(_root, ".aiw-launcher-session");
+            _homeLayoutPath = Path.Combine(_root, "launcher", "home-sections.order");
 
             Text = "AppInWhats DevBuild";
             FormBorderStyle = FormBorderStyle.None;
@@ -477,40 +491,109 @@ namespace AppInWhats
             introSub.Location = new Point(30, 52);
             introSub.BackColor = Color.Transparent;
 
-            _tileGrid = new DoubleBufferedPanel();
-            _tileGrid.Location = new Point(24, 90);
-            _tileGrid.Size = new Size(1040, 400);
-            _tileGrid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            _tileGrid.BackColor = Bg;
-            _tileGrid.AutoScroll = true;
+            _homeScrollHost = new DoubleBufferedPanel();
+            _homeScrollHost.Location = new Point(0, 90);
+            _homeScrollHost.BackColor = Bg;
+            _homeScrollHost.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
 
-            TileInfo[] tiles = new TileInfo[]
-            {
-                new TileInfo("Native", "Local", "Sin Docker · ligero", Color.FromArgb(0, 180, 120), "N", new Action(StartNativeLocal)),
-                new TileInfo("Native", "Remote", "API remota", Color.FromArgb(0, 150, 230), "R", new Action(StartNativeRemote)),
-                new TileInfo("Docker", "Local", "Stack completo", Color.FromArgb(80, 140, 220), "D", new Action(StartDockerLocal)),
-                new TileInfo("Docker", "Remote", "Front + API remota", Color.FromArgb(230, 160, 40), "⇄", new Action(StartDockerRemote)),
-                new TileInfo("Optimizado", "Docker", "Menos CPU/RAM", Color.FromArgb(40, 170, 160), "⚡", new Action(StartOptLocal)),
-                new TileInfo("Optimizado", "Remote", "Opt + remoto", Color.FromArgb(70, 140, 210), "⚡", new Action(StartOptRemote)),
-                new TileInfo("Instalar", "npm", "Dependencias", Color.FromArgb(220, 90, 110), "↓", new Action(StartInstall)),
-            };
+            _homeScrollBar = new ModernVScrollBar();
+            _homeScrollBar.Dock = DockStyle.Right;
+            _homeScrollBar.Width = 12;
+            _homeScrollBar.Visible = true;
+            _homeScrollBar.Scroll += delegate { ApplyHomeScroll(); };
+
+            _homeViewport = new DoubleBufferedPanel();
+            _homeViewport.Dock = DockStyle.Fill;
+            _homeViewport.BackColor = Bg;
+            _homeViewport.Padding = new Padding(0);
+
+            _tileGrid = new DoubleBufferedPanel();
+            _tileGrid.Location = new Point(0, 0);
+            _tileGrid.BackColor = Bg;
 
             const int tw = 168;
             const int th = 168;
-            _homeTiles.Clear();
-            for (int i = 0; i < tiles.Length; i++)
+            _homeSections.Clear();
+
+            Dictionary<string, HomeSection> byId = new Dictionary<string, HomeSection>(StringComparer.OrdinalIgnoreCase);
+            byId["Native"] = MakeHomeSection(
+                "Native",
+                "Native",
+                "Sin Docker · más ligero y rápido de arrancar",
+                Color.FromArgb(0, 180, 120),
+                new TileInfo[]
+                {
+                    new TileInfo("Native", "Local", "Sin Docker · ligero", Color.FromArgb(0, 180, 120), "N", new Action(StartNativeLocal)),
+                    new TileInfo("Native", "Remote", "API remota", Color.FromArgb(0, 150, 230), "R", new Action(StartNativeRemote)),
+                }, tw, th);
+            byId["Docker"] = MakeHomeSection(
+                "Docker",
+                "Docker",
+                "Stack en contenedores · local, remoto u optimizado",
+                Color.FromArgb(80, 140, 220),
+                new TileInfo[]
+                {
+                    new TileInfo("Docker", "Local", "Stack completo", Color.FromArgb(80, 140, 220), "D", new Action(StartDockerLocal)),
+                    new TileInfo("Docker", "Remote", "Front + API remota", Color.FromArgb(230, 160, 40), "⇄", new Action(StartDockerRemote)),
+                    new TileInfo("Optimizado", "Docker", "Menos CPU/RAM", Color.FromArgb(40, 170, 160), "⚡", new Action(StartOptLocal)),
+                    new TileInfo("Optimizado", "Remote", "Opt + remoto", Color.FromArgb(70, 140, 210), "⚡", new Action(StartOptRemote)),
+                }, tw, th);
+            byId["Otros"] = MakeHomeSection(
+                "Otros",
+                "Otros",
+                "Utilidades del entorno de desarrollo",
+                Color.FromArgb(220, 90, 110),
+                new TileInfo[]
+                {
+                    new TileInfo("Instalar", "npm", "Dependencias", Color.FromArgb(220, 90, 110), "↓", new Action(StartInstall)),
+                    new TileInfo("Compilar", "front", "Production · abre dist", Color.FromArgb(90, 100, 120), "⚙", new Action(StartCompileFrontFromHome)),
+                }, tw, th);
+            byId["Servidor"] = MakeHomeSection(
+                "Servidor",
+                "Servidor",
+                "Ejecuta back/front en Debian remoto · sin consumir PC local",
+                Color.FromArgb(90, 100, 140),
+                new TileInfo[]
+                {
+                    new TileInfo("Servidor", "SSH", "IP · puerto 1231", Color.FromArgb(90, 100, 140), "☁", new Action(StartServerMode)),
+                }, tw, th);
+
+            string[] defaultOrder = new string[] { "Native", "Docker", "Otros", "Servidor" };
+            List<string> order = LoadHomeSectionOrder(defaultOrder);
+            HashSet<string> used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < order.Count; i++)
             {
-                Control tile = CreateTile(tiles[i], tw, th);
-                _tileGrid.Controls.Add(tile);
-                _homeTiles.Add(tile);
+                HomeSection sec;
+                if (byId.TryGetValue(order[i], out sec) && used.Add(order[i]))
+                    _homeSections.Add(sec);
             }
+            for (int i = 0; i < defaultOrder.Length; i++)
+            {
+                if (used.Add(defaultOrder[i]))
+                    _homeSections.Add(byId[defaultOrder[i]]);
+            }
+
+            Label orderHint = new Label();
+            orderHint.Text = "Arrastra ⋮⋮ en cada categoría para reordenar · se guarda al soltar";
+            orderHint.Font = new Font("Segoe UI", 8.5f);
+            orderHint.ForeColor = TextMuted;
+            orderHint.AutoSize = true;
+            orderHint.Location = new Point(30, 72);
+            orderHint.BackColor = Color.Transparent;
+            _homeViewport.Controls.Add(_tileGrid);
+            _homeScrollHost.Controls.Add(_homeViewport);
+            _homeScrollHost.Controls.Add(_homeScrollBar);
+            _homeScrollHost.MouseWheel += HomeMouseWheel;
+            _homeViewport.MouseWheel += HomeMouseWheel;
+            _tileGrid.MouseWheel += HomeMouseWheel;
 
             _homeContent = new DoubleBufferedPanel();
             _homeContent.Dock = DockStyle.Fill;
             _homeContent.BackColor = Bg;
             _homeContent.Controls.Add(intro);
             _homeContent.Controls.Add(introSub);
-            _homeContent.Controls.Add(_tileGrid);
+            _homeContent.Controls.Add(orderHint);
+            _homeContent.Controls.Add(_homeScrollHost);
             _homeContent.Resize += delegate { LayoutHomeTiles(); };
 
             _homePanel.Controls.Add(_homeContent);
@@ -520,30 +603,322 @@ namespace AppInWhats
             LayoutHomeTiles();
         }
 
+        void HomeMouseWheel(object sender, MouseEventArgs e)
+        {
+            if (_homeScrollBar == null || !_homeScrollBar.Enabled) return;
+            int delta = e.Delta > 0 ? -48 : 48;
+            _homeScrollBar.Value = _homeScrollBar.Value + delta;
+        }
+
+        void ApplyHomeScroll()
+        {
+            if (_tileGrid == null || _homeScrollBar == null) return;
+            _tileGrid.Top = -_homeScrollBar.Value;
+        }
+
+        HomeSection MakeHomeSection(string id, string title, string subtitle, Color accent, TileInfo[] tiles, int tw, int th)
+        {
+            HomeSection section = new HomeSection();
+            section.Id = id;
+            section.Accent = accent;
+
+            SectionCard card = new SectionCard(accent);
+            card.BackColor = Bg;
+            section.Card = card;
+
+            Label titleLbl = new Label();
+            titleLbl.Text = title;
+            titleLbl.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
+            titleLbl.ForeColor = TextMain;
+            titleLbl.AutoSize = true;
+            titleLbl.Location = new Point(52, 14);
+            titleLbl.BackColor = Color.Transparent;
+
+            Label subLbl = new Label();
+            subLbl.Text = subtitle;
+            subLbl.Font = new Font("Segoe UI", 8.75f);
+            subLbl.ForeColor = TextMuted;
+            subLbl.AutoSize = true;
+            subLbl.Location = new Point(54, 38);
+            subLbl.BackColor = Color.Transparent;
+
+            Label grip = new Label();
+            grip.Text = "⋮⋮";
+            grip.Font = new Font("Segoe UI Semibold", 14f, FontStyle.Bold);
+            grip.ForeColor = Color.FromArgb(160, 168, 180);
+            grip.AutoSize = true;
+            grip.BackColor = Color.Transparent;
+            grip.Cursor = Cursors.SizeAll;
+            grip.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            section.DragHandle = grip;
+
+            card.Controls.Add(titleLbl);
+            card.Controls.Add(subLbl);
+            card.Controls.Add(grip);
+
+            for (int i = 0; i < tiles.Length; i++)
+            {
+                Control tile = CreateTile(tiles[i], tw, th);
+                card.Controls.Add(tile);
+                section.Tiles.Add(tile);
+            }
+
+            WireSectionDrag(section, grip);
+            WireSectionDrag(section, titleLbl);
+            WireSectionDrag(section, subLbl);
+            card.MouseMove += delegate(object s, MouseEventArgs e)
+            {
+                if (_draggingSection && _dragSection == section)
+                    MoveSectionDrag(e);
+            };
+            card.MouseUp += delegate(object s, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left)
+                    EndSectionDrag();
+            };
+
+            card.Resize += delegate
+            {
+                if (section.DragHandle != null)
+                    section.DragHandle.Location = new Point(Math.Max(60, card.Width - 36), 16);
+            };
+
+            _tileGrid.Controls.Add(card);
+            WireHomeWheel(card);
+            return section;
+        }
+
+        void WireSectionDrag(HomeSection section, Control handle)
+        {
+            if (section == null || handle == null) return;
+            handle.Cursor = Cursors.SizeAll;
+            handle.MouseDown += delegate(object s, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left) return;
+                BeginSectionDrag(section, e);
+            };
+            handle.MouseMove += delegate(object s, MouseEventArgs e)
+            {
+                if (_draggingSection && _dragSection == section)
+                    MoveSectionDrag(e);
+            };
+            handle.MouseUp += delegate(object s, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left)
+                    EndSectionDrag();
+            };
+        }
+
+        void BeginSectionDrag(HomeSection section, MouseEventArgs e)
+        {
+            if (section == null || section.Card == null) return;
+            _draggingSection = true;
+            _dragSection = section;
+            Point grid = _tileGrid.PointToClient(Control.MousePosition);
+            _dragOffsetY = grid.Y - section.Card.Top;
+            section.Card.BringToFront();
+            section.Card.Cursor = Cursors.SizeAll;
+            section.Card.Capture = true;
+        }
+
+        void MoveSectionDrag(MouseEventArgs e)
+        {
+            if (!_draggingSection || _dragSection == null || _dragSection.Card == null) return;
+            Point grid = _tileGrid.PointToClient(Control.MousePosition);
+            int newTop = grid.Y - _dragOffsetY;
+            if (newTop < 0) newTop = 0;
+            int maxTop = Math.Max(0, _tileGrid.Height - _dragSection.Card.Height);
+            if (newTop > maxTop) newTop = maxTop;
+            _dragSection.Card.Top = newTop;
+
+            if (_homeScrollBar != null && _homeScrollBar.Enabled && _homeViewport != null)
+            {
+                Point vp = _homeViewport.PointToClient(Control.MousePosition);
+                if (vp.Y < 28)
+                    _homeScrollBar.Value = Math.Max(_homeScrollBar.Minimum, _homeScrollBar.Value - 18);
+                else if (vp.Y > _homeViewport.Height - 28)
+                {
+                    int maxVal = Math.Max(_homeScrollBar.Minimum, _homeScrollBar.Maximum - Math.Max(0, _homeScrollBar.LargeChange - 1));
+                    _homeScrollBar.Value = Math.Min(maxVal, _homeScrollBar.Value + 18);
+                }
+            }
+        }
+
+        void EndSectionDrag()
+        {
+            if (!_draggingSection || _dragSection == null)
+            {
+                _draggingSection = false;
+                _dragSection = null;
+                return;
+            }
+
+            HomeSection moving = _dragSection;
+            try { if (moving.Card != null) moving.Card.Capture = false; } catch { }
+
+            int center = moving.Card.Top + moving.Card.Height / 2;
+            int oldIndex = _homeSections.IndexOf(moving);
+            int newIndex = _homeSections.Count - 1;
+
+            for (int i = 0; i < _homeSections.Count; i++)
+            {
+                HomeSection other = _homeSections[i];
+                if (other == moving || other.Card == null) continue;
+                int mid = other.Card.Top + other.Card.Height / 2;
+                if (center < mid)
+                {
+                    newIndex = _homeSections.IndexOf(other);
+                    if (oldIndex >= 0 && newIndex > oldIndex) newIndex--;
+                    break;
+                }
+            }
+            if (newIndex < 0) newIndex = 0;
+            if (newIndex >= _homeSections.Count) newIndex = _homeSections.Count - 1;
+
+            if (oldIndex >= 0 && oldIndex != newIndex)
+            {
+                _homeSections.RemoveAt(oldIndex);
+                _homeSections.Insert(newIndex, moving);
+                SaveHomeSectionOrder();
+            }
+
+            if (moving.Card != null) moving.Card.Cursor = Cursors.Default;
+            _draggingSection = false;
+            _dragSection = null;
+            LayoutHomeTiles();
+        }
+
+        List<string> LoadHomeSectionOrder(string[] defaults)
+        {
+            List<string> result = new List<string>();
+            try
+            {
+                if (!string.IsNullOrEmpty(_homeLayoutPath) && File.Exists(_homeLayoutPath))
+                {
+                    string[] lines = File.ReadAllLines(_homeLayoutPath, Encoding.UTF8);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        string line = (lines[i] ?? "").Trim();
+                        if (line.Length == 0 || line.StartsWith("#")) continue;
+                        if (!result.Contains(line)) result.Add(line);
+                    }
+                }
+            }
+            catch { }
+            if (result.Count == 0 && defaults != null)
+            {
+                for (int i = 0; i < defaults.Length; i++)
+                    result.Add(defaults[i]);
+            }
+            return result;
+        }
+
+        void SaveHomeSectionOrder()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_homeLayoutPath)) return;
+                string dir = Path.GetDirectoryName(_homeLayoutPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("# Orden de categorías del inicio (AppInWhats DevBuild)");
+                for (int i = 0; i < _homeSections.Count; i++)
+                {
+                    if (_homeSections[i] != null && !string.IsNullOrEmpty(_homeSections[i].Id))
+                        sb.AppendLine(_homeSections[i].Id);
+                }
+                File.WriteAllText(_homeLayoutPath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        void WireHomeWheel(Control root)
+        {
+            if (root == null) return;
+            root.MouseWheel -= HomeMouseWheel;
+            root.MouseWheel += HomeMouseWheel;
+            for (int i = 0; i < root.Controls.Count; i++)
+                WireHomeWheel(root.Controls[i]);
+        }
+
         void LayoutHomeTiles()
         {
-            if (_tileGrid == null || _homeContent == null || _homeTiles.Count == 0) return;
+            if (_homeScrollHost == null || _homeContent == null || _homeSections.Count == 0) return;
+            if (_homeContent.ClientSize.Width <= 0 || _homeContent.ClientSize.Height <= 0) return;
 
             const int tw = 168;
             const int th = 168;
-            const int gap = 18;
-            const int padX = 28;
-            const int top = 90;
+            const int gap = 16;
+            const int padLeft = 28;
+            const int padRight = 8;
+            const int top = 98;
+            const int sectionGap = 18;
+            const int headerH = 64;
+            const int cardPad = 16;
+            const int bottomPad = 20;
+            const int barW = 12;
 
-            int availW = Math.Max(200, _homeContent.ClientSize.Width - padX * 2);
-            int availH = Math.Max(160, _homeContent.ClientSize.Height - top - 16);
+            int hostH = Math.Max(120, _homeContent.ClientSize.Height - top);
+            int hostW = Math.Max(200, _homeContent.ClientSize.Width);
+            _homeScrollHost.Location = new Point(0, top);
+            _homeScrollHost.Size = new Size(hostW, hostH);
 
-            _tileGrid.Location = new Point(padX, top);
-            _tileGrid.Size = new Size(availW, availH);
-
-            int cols = Math.Max(1, (availW + gap) / (tw + gap));
-            if (cols > _homeTiles.Count) cols = _homeTiles.Count;
-
-            for (int i = 0; i < _homeTiles.Count; i++)
+            // Siempre reserva la franja derecha: evita bucles al mostrar/ocultar la barra
+            if (_homeScrollBar != null)
             {
-                int col = i % cols;
-                int row = i / cols;
-                _homeTiles[i].Location = new Point(col * (tw + gap), row * (th + gap));
+                _homeScrollBar.Visible = true;
+                _homeScrollBar.Width = barW;
+            }
+
+            int viewportW = Math.Max(180, hostW - barW);
+            int viewportH = Math.Max(80, hostH);
+            int contentW = Math.Max(tw + cardPad * 2, viewportW - padLeft - padRight);
+            int innerW = Math.Max(tw, contentW - cardPad * 2);
+            int cols = Math.Max(1, (innerW + gap) / (tw + gap));
+            int y = 4;
+
+            for (int s = 0; s < _homeSections.Count; s++)
+            {
+                HomeSection section = _homeSections[s];
+                if (section.Card == null) continue;
+
+                int sectionCols = cols;
+                if (sectionCols > section.Tiles.Count) sectionCols = Math.Max(1, section.Tiles.Count);
+                int rows = (section.Tiles.Count + sectionCols - 1) / sectionCols;
+                if (rows < 1) rows = 1;
+
+                int tilesH = rows * th + Math.Max(0, rows - 1) * gap;
+                int cardH = headerH + tilesH + cardPad;
+
+                section.Card.Location = new Point(padLeft, y);
+                section.Card.Size = new Size(contentW, cardH);
+
+                for (int i = 0; i < section.Tiles.Count; i++)
+                {
+                    int col = i % sectionCols;
+                    int row = i / sectionCols;
+                    section.Tiles[i].Location = new Point(
+                        cardPad + col * (tw + gap),
+                        headerH + row * (th + gap));
+                }
+
+                y += cardH + sectionGap;
+            }
+
+            int contentH = y + bottomPad;
+            _tileGrid.Width = Math.Max(viewportW, contentW + padLeft);
+            _tileGrid.Height = Math.Max(viewportH, contentH);
+
+            int maxScroll = Math.Max(0, contentH - viewportH);
+            if (_homeScrollBar != null)
+            {
+                _homeScrollBar.Minimum = 0;
+                _homeScrollBar.LargeChange = Math.Max(1, viewportH);
+                _homeScrollBar.Maximum = Math.Max(viewportH, contentH);
+                if (_homeScrollBar.Value > maxScroll) _homeScrollBar.Value = maxScroll;
+                _homeScrollBar.Enabled = maxScroll > 0;
+                ApplyHomeScroll();
             }
         }
 
@@ -579,11 +954,7 @@ namespace AppInWhats
 
             _btnOpen = MakeToolButton("Abrir app", Color.FromArgb(70, 130, 180), Color.White);
             _btnOpen.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _btnOpen.Click += delegate
-            {
-                try { Process.Start("http://localhost:50080"); }
-                catch { }
-            };
+            _btnOpen.Click += delegate { OpenAppInBrowser(); };
 
             _btnBuild = MakeToolButton("Compilar front", Color.FromArgb(90, 100, 120), Color.White);
             _btnBuild.Size = new Size(132, 34);
@@ -613,6 +984,28 @@ namespace AppInWhats
             _toolbar.Controls.Add(_btnBuild);
             _toolbar.Controls.Add(_btnHome);
             _toolbar.Resize += delegate { LayoutToolbarButtons(); };
+
+            _serverBar = new DoubleBufferedPanel();
+            _serverBar.Dock = DockStyle.Top;
+            _serverBar.Height = 48;
+            _serverBar.BackColor = Color.FromArgb(245, 247, 250);
+            _serverBar.Visible = false;
+            _serverBar.Paint += delegate(object s, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(Border, 1))
+                    e.Graphics.DrawLine(pen, 0, _serverBar.Height - 1, _serverBar.Width, _serverBar.Height - 1);
+            };
+
+            _btnSyncBack = MakeToolButton("Enviar backend", Color.FromArgb(124, 58, 237), Color.White);
+            _btnSyncFront = MakeToolButton("Enviar frontend", Accent, Color.White);
+            _btnSyncBoth = MakeToolButton("Enviar ambos", Color.FromArgb(90, 100, 140), Color.White);
+            _btnSyncBack.Click += delegate { RunServerAction("deploy-backend", true); };
+            _btnSyncFront.Click += delegate { RunServerAction("deploy-frontend", false); };
+            _btnSyncBoth.Click += delegate { RunServerAction("deploy-both", true); };
+            _serverBar.Controls.Add(_btnSyncBack);
+            _serverBar.Controls.Add(_btnSyncFront);
+            _serverBar.Controls.Add(_btnSyncBoth);
+            _serverBar.Resize += delegate { LayoutServerBar(); };
 
             _statsBar = new DoubleBufferedPanel();
             _statsBar.Dock = DockStyle.Top;
@@ -651,12 +1044,14 @@ namespace AppInWhats
             _split.Panel1.Controls.Add(_termBack);
             _split.Panel2.Controls.Add(_termFront);
 
-            // orden Dock: Fill primero, luego Top (stats), luego Top (toolbar)
+            // orden Dock: Fill primero, luego Top (stats / server / toolbar)
             _sessionPanel.Controls.Add(_split);
             _sessionPanel.Controls.Add(_statsBar);
+            _sessionPanel.Controls.Add(_serverBar);
             _sessionPanel.Controls.Add(_toolbar);
             Controls.Add(_sessionPanel);
             LayoutStatsBar();
+            LayoutServerBar();
         }
 
         StatsChip MakeStatsChip(string role, Color accent)
@@ -731,6 +1126,31 @@ namespace AppInWhats
             _btnHome.Location = new Point(_btnBuild.Left - _btnHome.Width - 10, 12);
         }
 
+        void LayoutServerBar()
+        {
+            if (_serverBar == null || _btnSyncBoth == null) return;
+            int x = 16;
+            _btnSyncBack.Location = new Point(x, 8);
+            x += _btnSyncBack.Width + 8;
+            _btnSyncFront.Location = new Point(x, 8);
+            x += _btnSyncFront.Width + 8;
+            _btnSyncBoth.Location = new Point(x, 8);
+        }
+
+        bool IsServerMode()
+        {
+            return string.Equals(_modeId, "server", StringComparison.OrdinalIgnoreCase);
+        }
+
+        void UpdateServerBarVisibility()
+        {
+            if (_serverBar == null) return;
+            _serverBar.Visible = IsServerMode();
+            if (_btnBuild != null) _btnBuild.Visible = !IsServerMode();
+            LayoutToolbarButtons();
+            LayoutServerBar();
+        }
+
         RoundedButton MakeToolButton(string text, Color bg, Color fg)
         {
             RoundedButton b = new RoundedButton(text, bg, fg);
@@ -745,6 +1165,8 @@ namespace AppInWhats
             _homePanel.BringToFront();
             _status.Text = _root;
             _status.ForeColor = TextMuted;
+            if (_serverBar != null) _serverBar.Visible = false;
+            if (_btnBuild != null) _btnBuild.Visible = true;
         }
 
         void ShowSession(string title, bool dual)
@@ -761,8 +1183,16 @@ namespace AppInWhats
 
             if (dual)
             {
-                _termBack.SetTitle("Backend");
-                _termFront.SetTitle("Frontend");
+                if (IsServerMode())
+                {
+                    _termBack.SetTitle("Backend remoto (SSH)");
+                    _termFront.SetTitle("Frontend remoto · " + GetServerHostPortLabel());
+                }
+                else
+                {
+                    _termBack.SetTitle("Backend");
+                    _termFront.SetTitle("Frontend");
+                }
             }
             else
             {
@@ -772,12 +1202,13 @@ namespace AppInWhats
             SafeConfigureSplit(dual);
             LayoutToolbarButtons();
             LayoutStatsBar();
+            UpdateServerBarVisibility();
             ResetStatsDisplay();
             if (_termBack != null) _termBack.RefreshGitBranch();
             if (_termFront != null) _termFront.RefreshGitBranch();
             if (_statsBar != null)
             {
-                _statsBar.Visible = true;
+                _statsBar.Visible = !IsServerMode();
                 _statsBar.Invalidate(true);
             }
         }
@@ -801,12 +1232,16 @@ namespace AppInWhats
             if (_btnStart != null)
                 _btnStart.Enabled = !running && !string.IsNullOrEmpty(_modeId);
             _status.ForeColor = running ? Accent : TextMuted;
-            _status.Text = running ? "Ejecutando…  ·  http://localhost:50080" : "Detenido";
+            if (running && IsServerMode())
+                _status.Text = "Servidor remoto  ·  " + _serverAppUrl;
+            else
+                _status.Text = running ? "Ejecutando…  ·  http://localhost:50080" : "Detenido";
             if (!running && !_closing)
             {
                 ClearSessionFile();
                 ResetStatsDisplay();
             }
+            UpdateServerBarVisibility();
         }
 
         void RestartCurrentMode()
@@ -833,6 +1268,8 @@ namespace AppInWhats
                 case "opt-local": StartOptLocal(); break;
                 case "opt-remote": StartOptRemote(); break;
                 case "install": StartInstall(); break;
+                case "server": StartServerMode(); break;
+                case "compile-front": StartCompileFrontFromHome(); break;
                 default:
                     MessageBox.Show("Modo desconocido: " + _modeId, "AppInWhats DevBuild",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1145,6 +1582,263 @@ namespace AppInWhats
             StartTracked("Install", "cmd.exe", "/c " + cmd, _root, new Dictionary<string, string>(), _termFront);
         }
 
+        void OpenAppInBrowser()
+        {
+            if (IsServerMode())
+                LoadServerAppUrlFromConfig();
+
+            string url = IsServerMode() ? _serverAppUrl : "http://localhost:50080";
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = url;
+                psi.UseShellExecute = true;
+                Process.Start(psi);
+                if (_status != null)
+                {
+                    _status.Text = "Abriendo  ·  " + url;
+                    _status.ForeColor = Accent;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "No se pudo abrir el navegador con:\n" + url + "\n\n" + ex.Message,
+                    "AppInWhats DevBuild",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        string GetServerHostPortLabel()
+        {
+            try
+            {
+                string u = _serverAppUrl ?? "";
+                if (u.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                    return u.Substring(7);
+                if (u.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    return u.Substring(8);
+                return u;
+            }
+            catch { return "217.160.205.6:1231"; }
+        }
+
+        void StartServerMode()
+        {
+            if (!EnsureCanStart()) return;
+
+            string cfgPath = Path.Combine(_root, "launcher", "server.config.json");
+            if (!File.Exists(cfgPath))
+            {
+                MessageBox.Show(
+                    "Falta launcher/server.config.json\n\nCopia server.config.example.json y rellena host, usuario y password.",
+                    "AppInWhats DevBuild", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            LoadServerAppUrlFromConfig();
+            bool alreadyInSession = _sessionPanel != null && _sessionPanel.Visible && IsServerMode();
+            if (!alreadyInSession)
+            {
+                BeginMode("Servidor remoto", true, false, false, false, "server");
+                _termBack.SetTitle("Backend remoto (SSH)");
+                _termFront.SetTitle("Frontend remoto · " + GetServerHostPortLabel());
+                _termBack.Append("Modo ejecución en servidor\r\n", Accent);
+                _termBack.Append("App en el navegador local: " + _serverAppUrl + "\r\n", TextMuted);
+                _termBack.Append("Usa «Abrir app» para abrirla aquí.\r\n\r\n", TextMuted);
+                _termFront.Append("Logs de despliegue / arranque remoto\r\n", Accent);
+                _termFront.Append("URL: " + _serverAppUrl + "\r\n\r\n", TextMuted);
+                RunServerAction("bootstrap", true);
+            }
+            else
+            {
+                SetRunning(true);
+                _termBack.SetTitle("Backend remoto (SSH)");
+                _termFront.SetTitle("Frontend remoto · " + GetServerHostPortLabel());
+                RunServerAction("start", true);
+            }
+        }
+
+        void LoadServerAppUrlFromConfig()
+        {
+            try
+            {
+                string cfgPath = Path.Combine(_root, "launcher", "server.config.json");
+                if (!File.Exists(cfgPath)) return;
+                string json = File.ReadAllText(cfgPath, Encoding.UTF8);
+                string host = ExtractJsonString(json, "host");
+                string fePort = ExtractJsonNumberOrString(json, "frontendPort");
+                if (string.IsNullOrEmpty(host)) host = "217.160.205.6";
+                if (string.IsNullOrEmpty(fePort)) fePort = "1231";
+                _serverAppUrl = "http://" + host + ":" + fePort;
+            }
+            catch
+            {
+                _serverAppUrl = "http://217.160.205.6:1231";
+            }
+        }
+
+        static string ExtractJsonString(string json, string key)
+        {
+            string needle = "\"" + key + "\"";
+            int i = json.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+            if (i < 0) return "";
+            int colon = json.IndexOf(':', i + needle.Length);
+            if (colon < 0) return "";
+            int q1 = json.IndexOf('"', colon + 1);
+            if (q1 < 0) return "";
+            int q2 = json.IndexOf('"', q1 + 1);
+            if (q2 < 0) return "";
+            return json.Substring(q1 + 1, q2 - q1 - 1);
+        }
+
+        static string ExtractJsonNumberOrString(string json, string key)
+        {
+            string asStr = ExtractJsonString(json, key);
+            if (!string.IsNullOrEmpty(asStr)) return asStr;
+            string needle = "\"" + key + "\"";
+            int i = json.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+            if (i < 0) return "";
+            int colon = json.IndexOf(':', i + needle.Length);
+            if (colon < 0) return "";
+            int j = colon + 1;
+            while (j < json.Length && char.IsWhiteSpace(json[j])) j++;
+            int k = j;
+            while (k < json.Length && (char.IsDigit(json[k]) || json[k] == '.')) k++;
+            if (k <= j) return "";
+            return json.Substring(j, k - j);
+        }
+
+        void RunServerAction(string action, bool preferBackLog)
+        {
+            string script = Path.Combine(_root, "launcher", "server_remote.py");
+            if (!File.Exists(script))
+            {
+                MessageBox.Show("No se encuentra launcher/server_remote.py", "AppInWhats DevBuild",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string py = FindPython();
+            if (string.IsNullOrEmpty(py))
+            {
+                MessageBox.Show("No se encontró Python. Instálalo para el modo servidor (SSH).",
+                    "AppInWhats DevBuild", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            TerminalView term = preferBackLog ? _termBack : _termFront;
+            if (term == null) term = _termFront;
+            term.Append("\r\n═══ Servidor · " + action + " ═══\r\n", Accent);
+
+            SetServerSyncEnabled(false);
+            Dictionary<string, string> env = new Dictionary<string, string>();
+            env["PYTHONIOENCODING"] = "utf-8";
+            env["PYTHONUNBUFFERED"] = "1";
+
+            string args = (py == "py" ? "-3 " : "") + "\"" + script + "\" " + action;
+            StartTracked(
+                "Server-" + action,
+                py,
+                args,
+                _root,
+                env,
+                term);
+
+            BeginInvoke(new Action(delegate
+            {
+                System.Windows.Forms.Timer t = new System.Windows.Forms.Timer();
+                t.Interval = 800;
+                t.Tick += delegate
+                {
+                    bool busy = false;
+                    lock (_procLock)
+                    {
+                        for (int i = 0; i < _procs.Count; i++)
+                        {
+                            try { if (!_procs[i].HasExited) { busy = true; break; } } catch { }
+                        }
+                    }
+                    if (!busy)
+                    {
+                        t.Stop();
+                        t.Dispose();
+                        SetServerSyncEnabled(true);
+                        if (IsServerMode())
+                        {
+                            SetRunning(true);
+                            _status.Text = "Servidor remoto  ·  " + _serverAppUrl;
+                            _status.ForeColor = Accent;
+                        }
+                    }
+                };
+                t.Start();
+            }));
+        }
+
+        void SetServerSyncEnabled(bool enabled)
+        {
+            if (_btnSyncBack != null) _btnSyncBack.Enabled = enabled;
+            if (_btnSyncFront != null) _btnSyncFront.Enabled = enabled;
+            if (_btnSyncBoth != null) _btnSyncBoth.Enabled = enabled;
+        }
+
+        string FindPython()
+        {
+            string[] candidates = new string[] { "python", "python3", "py" };
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = candidates[i];
+                    psi.Arguments = "--version";
+                    psi.UseShellExecute = false;
+                    psi.CreateNoWindow = true;
+                    psi.RedirectStandardOutput = true;
+                    psi.RedirectStandardError = true;
+                    using (Process p = Process.Start(psi))
+                    {
+                        if (p == null) continue;
+                        p.WaitForExit(5000);
+                        if (p.ExitCode == 0) return candidates[i];
+                    }
+                }
+                catch { }
+            }
+            // py launcher
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = "py";
+                psi.Arguments = "-3 --version";
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                using (Process p = Process.Start(psi))
+                {
+                    if (p != null)
+                    {
+                        p.WaitForExit(5000);
+                        if (p.ExitCode == 0) return "py";
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        void StartCompileFrontFromHome()
+        {
+            if (!EnsureCanStart() || !EnsureNpx()) return;
+            BeginMode("Compilar frontend", false, false, false, false, "compile-front");
+            _termFront.SetTitle("Compilar frontend (production)");
+            _openDistAfterBuild = true;
+            StartFrontendProductionBuild();
+        }
+
         void StartFrontendProductionBuild()
         {
             if (!EnsureNpx()) return;
@@ -1165,23 +1859,23 @@ namespace AppInWhats
             {
                 MessageBox.Show("No se encuentra la carpeta frontend.", "AppInWhats",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _openDistAfterBuild = false;
                 return;
             }
 
-            // Muestra el panel de frontend aunque esté en modo dual
-            try
+            if (_sessionPanel == null || !_sessionPanel.Visible)
             {
-                if (_split != null && _split.Panel1Collapsed)
-                {
-                    // sesión single-pane: el log ya va a _termFront
-                }
+                // Llamado desde toolbar sin sesión: no debería pasar; fuerza sesión mínima
+                BeginMode("Compilar frontend", false, false, false, false, "compile-front");
             }
-            catch { }
 
             _termFront.Append("\r\n", TermFg);
             _termFront.Append("═══ Compilar frontend (production) ═══\r\n", Accent);
             _termFront.Append("ng build --configuration=production\r\n", TextMuted);
-            _termFront.Append("(el serve en marcha no se detiene)\r\n\r\n", TextMuted);
+            if (_openDistAfterBuild)
+                _termFront.Append("Al terminar se abrirá la carpeta dist\r\n\r\n", TextMuted);
+            else
+                _termFront.Append("(el serve en marcha no se detiene)\r\n\r\n", TextMuted);
 
             if (_btnBuild != null) _btnBuild.Enabled = false;
             _status.Text = "Compilando frontend (production)…";
@@ -1192,6 +1886,8 @@ namespace AppInWhats
             env["NODE_OPTIONS"] = "--max-old-space-size=4096";
             env["NG_CLI_ANALYTICS"] = "false";
             env["FORCE_COLOR"] = "0";
+            bool openDist = _openDistAfterBuild;
+            _openDistAfterBuild = false;
 
             try
             {
@@ -1243,14 +1939,26 @@ namespace AppInWhats
                     {
                         int code = SafeExitCode(proc);
                         if (code == 0)
+                        {
                             _termFront.Append("\r\n■ Build production OK\r\n", Accent);
+                            if (openDist)
+                                OpenFrontendDistFolder();
+                        }
                         else
                             _termFront.Append("\r\n■ Build production falló · código " + code + "\r\n", Danger);
 
                         if (_btnBuild != null) _btnBuild.Enabled = true;
-                        if (_running)
+                        if (string.Equals(_modeId, "compile-front", StringComparison.OrdinalIgnoreCase))
                         {
-                            _status.Text = "Ejecutando…  ·  http://localhost:50080";
+                            SetRunning(false);
+                            _status.Text = code == 0 ? "Build OK · dist abierta" : "Build production falló";
+                            _status.ForeColor = code == 0 ? Accent : Danger;
+                        }
+                        else if (_running)
+                        {
+                            _status.Text = IsServerMode()
+                                ? ("Servidor remoto  ·  " + _serverAppUrl)
+                                : "Ejecutando…  ·  http://localhost:50080";
                             _status.ForeColor = Accent;
                         }
                         else
@@ -1272,6 +1980,44 @@ namespace AppInWhats
             {
                 _termFront.Append("ERROR build: " + ex.Message + "\r\n", Color.FromArgb(255, 120, 120));
                 if (_btnBuild != null) _btnBuild.Enabled = true;
+            }
+        }
+
+        void OpenFrontendDistFolder()
+        {
+            string frontend = Path.Combine(_root, "frontend");
+            string[] candidates = new string[]
+            {
+                Path.Combine(frontend, "dist", "AiW"),
+                Path.Combine(frontend, "dist"),
+            };
+            string folder = null;
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (Directory.Exists(candidates[i]))
+                {
+                    folder = candidates[i];
+                    break;
+                }
+            }
+            if (folder == null)
+            {
+                _termFront.Append("No se encontró la carpeta dist tras el build.\r\n", Danger);
+                return;
+            }
+
+            _termFront.Append("Abriendo: " + folder + "\r\n", Accent);
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = "explorer.exe";
+                psi.Arguments = "\"" + folder + "\"";
+                psi.UseShellExecute = true;
+                Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                _termFront.Append("No se pudo abrir dist: " + ex.Message + "\r\n", Danger);
             }
         }
 
@@ -1390,6 +2136,14 @@ namespace AppInWhats
         void CheckAllExited()
         {
             if (_closing) return;
+            // En modo servidor los procesos locales son solo scripts de deploy;
+            // la app sigue viva en el Debian aunque el script termine.
+            if (IsServerMode()) return;
+            try
+            {
+                if (_buildProc != null && !_buildProc.HasExited) return;
+            }
+            catch { }
             lock (_procLock)
             {
                 for (int i = 0; i < _procs.Count; i++)
@@ -1403,6 +2157,37 @@ namespace AppInWhats
 
         void StopAll(bool announce)
         {
+            if (IsServerMode() && !_closing)
+            {
+                try
+                {
+                    string script = Path.Combine(_root, "launcher", "server_remote.py");
+                    string py = FindPython();
+                    if (!string.IsNullOrEmpty(py) && File.Exists(script))
+                    {
+                        if (_termFront != null)
+                            _termFront.Append("\r\nParando servicios en el servidor remoto…\r\n", TextMuted);
+                        ProcessStartInfo psi = new ProcessStartInfo();
+                        psi.FileName = py;
+                        psi.Arguments = (py == "py" ? "-3 " : "") + "\"" + script + "\" stop";
+                        psi.WorkingDirectory = _root;
+                        psi.UseShellExecute = false;
+                        psi.CreateNoWindow = true;
+                        psi.RedirectStandardOutput = true;
+                        psi.RedirectStandardError = true;
+                        using (Process p = Process.Start(psi))
+                        {
+                            if (p != null) p.WaitForExit(120000);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (_termFront != null)
+                        _termFront.Append("Error al parar remoto: " + ex.Message + "\r\n", Danger);
+                }
+            }
+
             if (_modeDocker && !_closing)
                 TryDockerDown();
 
@@ -1435,7 +2220,7 @@ namespace AppInWhats
             if (_btnBuild != null) _btnBuild.Enabled = true;
 
             // Asegura liberar puertos nativos aunque el árbol de PIDs haya quedado huérfano
-            if (!_modeDocker)
+            if (!_modeDocker && !IsServerMode())
                 FreeDevPorts();
 
             ClearSessionFile();
@@ -2012,17 +2797,11 @@ namespace AppInWhats
 
         Control CreateTile(TileInfo info, int w, int h)
         {
-            DoubleBufferedPanel card = new DoubleBufferedPanel();
-            card.Size = new Size(w, h);
-            card.BackColor = Bg;
-            card.Cursor = Cursors.Hand;
-
             TileFace face = new TileFace(info);
-            face.Dock = DockStyle.Fill;
+            face.Size = new Size(w, h);
             face.Cursor = Cursors.Hand;
             face.Click += delegate { info.Action(); };
-            card.Controls.Add(face);
-            return card;
+            return face;
         }
 
         sealed class TileFace : Control
@@ -2033,8 +2812,8 @@ namespace AppInWhats
             public TileFace(TileInfo info)
             {
                 _info = info;
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                BackColor = Bg;
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+                BackColor = Color.White;
                 MouseEnter += delegate { _hover = true; Invalidate(); };
                 MouseLeave += delegate { _hover = false; Invalidate(); };
             }
@@ -2043,18 +2822,14 @@ namespace AppInWhats
             {
                 Graphics g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Bg);
+                g.Clear(Color.White);
 
-                Rectangle shadow = new Rectangle(5, 7, Width - 10, Height - 10);
-                using (GraphicsPath sp = RoundRect(shadow, 24))
-                using (SolidBrush sb = new SolidBrush(Color.FromArgb(_hover ? 35 : 22, 0, 0, 0)))
-                    g.FillPath(sb, sp);
-
-                Rectangle rect = new Rectangle(0, 0, Width - 8, Height - 10);
-                Color face = _hover ? TileHover : Tile;
-                using (GraphicsPath path = RoundRect(rect, 24))
+                Rectangle rect = new Rectangle(1, 1, Width - 3, Height - 3);
+                Color face = _hover ? Color.FromArgb(248, 250, 252) : Color.FromArgb(252, 253, 255);
+                Color border = _hover ? Color.FromArgb(200, 210, 220) : Color.FromArgb(228, 232, 238);
+                using (GraphicsPath path = RoundRect(rect, 18))
                 using (SolidBrush brush = new SolidBrush(face))
-                using (Pen pen = new Pen(Border, 1.5f))
+                using (Pen pen = new Pen(border, 1.25f))
                 {
                     g.FillPath(brush, path);
                     g.DrawPath(pen, path);
@@ -2246,6 +3021,8 @@ namespace AppInWhats
             if (docker && opt) return "opt-local";
             if (docker && remote) return "docker-remote";
             if (docker) return "docker-local";
+            if (!string.IsNullOrEmpty(title) && title.IndexOf("Servidor", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "server";
             if (!string.IsNullOrEmpty(title) && title.IndexOf("Instalar", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "install";
             if (remote) return "native-remote";
@@ -2275,6 +3052,201 @@ namespace AppInWhats
                     catch { }
                 }
                 return false;
+            }
+        }
+
+        sealed class HomeSection
+        {
+            public string Id;
+            public SectionCard Card;
+            public Color Accent;
+            public Control DragHandle;
+            public readonly List<Control> Tiles = new List<Control>();
+        }
+
+        sealed class SectionCard : Panel
+        {
+            readonly Color _accent;
+
+            public SectionCard(Color accent)
+            {
+                _accent = accent;
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                UpdateStyles();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                Graphics g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Parent != null ? Parent.BackColor : Bg);
+
+                Rectangle rr = new Rectangle(0, 0, Width - 1, Height - 1);
+                using (GraphicsPath path = RoundRect(rr, 16))
+                using (SolidBrush fill = new SolidBrush(Color.White))
+                using (Pen pen = new Pen(Color.FromArgb(228, 232, 238), 1))
+                {
+                    g.FillPath(fill, path);
+                    g.DrawPath(pen, path);
+                }
+
+                // Punto del título
+                using (SolidBrush b = new SolidBrush(_accent))
+                    g.FillEllipse(b, 20, 20, 18, 18);
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(230, Color.White)))
+                    g.FillEllipse(b, 25, 25, 8, 8);
+            }
+        }
+
+        sealed class ModernVScrollBar : Control
+        {
+            int _minimum;
+            int _maximum = 100;
+            int _largeChange = 10;
+            int _value;
+            bool _dragging;
+            bool _hover;
+            int _dragOffset;
+
+            public event EventHandler Scroll;
+
+            public ModernVScrollBar()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                Width = 12;
+                BackColor = Bg;
+                Cursor = Cursors.Hand;
+            }
+
+            public int Minimum
+            {
+                get { return _minimum; }
+                set { _minimum = value; Invalidate(); }
+            }
+
+            public int Maximum
+            {
+                get { return _maximum; }
+                set { _maximum = Math.Max(_minimum, value); ClampValue(); Invalidate(); }
+            }
+
+            public int LargeChange
+            {
+                get { return _largeChange; }
+                set { _largeChange = Math.Max(1, value); Invalidate(); }
+            }
+
+            public int Value
+            {
+                get { return _value; }
+                set
+                {
+                    int v = value;
+                    int maxVal = Math.Max(_minimum, _maximum - Math.Max(0, _largeChange - 1));
+                    if (v < _minimum) v = _minimum;
+                    if (v > maxVal) v = maxVal;
+                    if (v == _value) return;
+                    _value = v;
+                    Invalidate();
+                    if (Scroll != null) Scroll(this, EventArgs.Empty);
+                }
+            }
+
+            void ClampValue()
+            {
+                int maxVal = Math.Max(_minimum, _maximum - Math.Max(0, _largeChange - 1));
+                if (_value > maxVal) _value = maxVal;
+                if (_value < _minimum) _value = _minimum;
+            }
+
+            Rectangle ThumbRect()
+            {
+                int track = Math.Max(1, Height - 8);
+                int range = Math.Max(1, _maximum - _minimum);
+                int thumbH = Math.Max(28, (int)((long)_largeChange * track / range));
+                if (thumbH > track) thumbH = track;
+                int maxVal = Math.Max(1, range - Math.Max(0, _largeChange - 1));
+                int travel = Math.Max(0, track - thumbH);
+                int y = 4 + (maxVal <= 0 ? 0 : (int)((long)_value * travel / maxVal));
+                return new Rectangle(2, y, Math.Max(6, Width - 4), thumbH);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                Graphics g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Parent != null ? Parent.BackColor : Bg);
+
+                Rectangle track = new Rectangle(3, 4, Math.Max(4, Width - 6), Math.Max(1, Height - 8));
+                using (GraphicsPath path = RoundRect(track, 4))
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(Enabled ? 228 : 238, 232, 238)))
+                    g.FillPath(b, path);
+
+                if (!Enabled) return;
+
+                Rectangle thumb = ThumbRect();
+                using (GraphicsPath path = RoundRect(thumb, 4))
+                using (SolidBrush b = new SolidBrush(_dragging
+                    ? Color.FromArgb(120, 130, 145)
+                    : (_hover ? Color.FromArgb(150, 160, 175) : Color.FromArgb(175, 182, 194))))
+                    g.FillPath(b, path);
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                _hover = true;
+                Invalidate();
+                base.OnMouseEnter(e);
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                _hover = false;
+                Invalidate();
+                base.OnMouseLeave(e);
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left) return;
+                Rectangle thumb = ThumbRect();
+                if (thumb.Contains(e.Location))
+                {
+                    _dragging = true;
+                    _dragOffset = e.Y - thumb.Y;
+                    Invalidate();
+                }
+                else
+                {
+                    int page = Math.Max(1, _largeChange - 8);
+                    Value = e.Y < thumb.Y ? _value - page : _value + page;
+                }
+                base.OnMouseDown(e);
+            }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                if (_dragging)
+                {
+                    int track = Math.Max(1, Height - 8);
+                    int range = Math.Max(1, _maximum - _minimum);
+                    int thumbH = Math.Max(28, (int)((long)_largeChange * track / range));
+                    if (thumbH > track) thumbH = track;
+                    int travel = Math.Max(1, track - thumbH);
+                    int maxVal = Math.Max(1, range - Math.Max(0, _largeChange - 1));
+                    int y = e.Y - _dragOffset - 4;
+                    if (y < 0) y = 0;
+                    if (y > travel) y = travel;
+                    Value = _minimum + (int)((long)y * maxVal / travel);
+                }
+                base.OnMouseMove(e);
+            }
+
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                _dragging = false;
+                Invalidate();
+                base.OnMouseUp(e);
             }
         }
 
