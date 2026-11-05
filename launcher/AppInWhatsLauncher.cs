@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -38,32 +38,15 @@ namespace AppInWhats
         }
     }
 
-    sealed class LauncherForm : Form
+    // Lógica de procesos/modos. La interfaz está en LauncherForm.Ui.cs y los controles en FluentControls.cs
+    sealed partial class LauncherForm : Form
     {
-        static readonly Color Bg = Color.FromArgb(245, 246, 248);
-        static readonly Color PanelBg = Color.FromArgb(255, 255, 255);
-        static readonly Color Tile = Color.FromArgb(255, 255, 255);
-        static readonly Color TileHover = Color.FromArgb(248, 249, 251);
-        static readonly Color TextMain = Color.FromArgb(32, 36, 42);
-        static readonly Color TextMuted = Color.FromArgb(110, 118, 128);
-        static readonly Color Accent = Color.FromArgb(0, 150, 230);
-        static readonly Color TitleBar = Color.FromArgb(255, 255, 255);
-        static readonly Color Danger = Color.FromArgb(220, 70, 70);
-        static readonly Color TermBg = Color.FromArgb(252, 252, 252);
-        static readonly Color TermFg = Color.FromArgb(40, 40, 44);
-        static readonly Color Border = Color.FromArgb(220, 224, 230);
-        static readonly Color WindowFrame = Color.FromArgb(180, 186, 194);
-        static readonly Color CaptionHover = Color.FromArgb(235, 238, 242);
-        static readonly Color CloseHover = Color.FromArgb(232, 17, 35);
-
         readonly string _root;
         readonly string _sessionPath;
         readonly List<Process> _procs = new List<Process>();
         readonly object _procLock = new object();
         IntPtr _job = IntPtr.Zero;
 
-        bool _maximized;
-        Rectangle _restoreBounds;
         bool _running;
         bool _closing;
         string _modeTitle = "";
@@ -71,233 +54,15 @@ namespace AppInWhats
         bool _modeDocker;
         bool _modeRemote;
         bool _modeOpt;
-
-        Panel _titleBar;
-        Panel _titleSep;
-        CaptionButton _capMin;
-        CaptionButton _capMax;
-        CaptionButton _capClose;
-        Panel _homePanel;
-        Panel _homeContent;
-        Panel _homeScrollHost;
-        Panel _homeViewport;
-        Panel _tileGrid;
-        ModernVScrollBar _homeScrollBar;
-        readonly List<HomeSection> _homeSections = new List<HomeSection>();
-        string _homeLayoutPath;
-        HomeSection _dragSection;
-        bool _draggingSection;
-        int _dragOffsetY;
-        Panel _resumeBanner;
-        Label _resumeLabel;
-        Panel _sessionPanel;
-        Panel _toolbar;
-        SplitContainer _split;
-        TerminalView _termBack;
-        TerminalView _termFront;
-        Label _sessionTitle;
-        Label _status;
         string _modeId = "";
-        RoundedButton _btnStop;
-        RoundedButton _btnStart;
-        RoundedButton _btnHome;
-        RoundedButton _btnOpen;
-        RoundedButton _btnBuild;
-        RoundedButton _btnSyncBack;
-        RoundedButton _btnSyncFront;
-        RoundedButton _btnSyncBoth;
-        Panel _serverBar;
-        string _serverAppUrl = "http://217.160.205.6:1231";
+        string _serverAppUrl = "";
         bool _openDistAfterBuild;
+        bool _uploadPleskAfterBuild;
         Process _buildProc;
-        Panel _statsBar;
-        StatsChip _statsBack;
-        StatsChip _statsFront;
-        StatsChip _statsTotal;
-        StatsChip _statsOther;
         System.Windows.Forms.Timer _watchTimer;
         readonly Dictionary<int, TimeSpan> _prevCpu = new Dictionary<int, TimeSpan>();
         DateTime _prevCpuSample = DateTime.MinValue;
 
-        public LauncherForm()
-        {
-            _root = ResolveRoot();
-            _sessionPath = Path.Combine(_root, ".aiw-launcher-session");
-            _homeLayoutPath = Path.Combine(_root, "launcher", "home-sections.order");
-
-            Text = "AppInWhats DevBuild";
-            FormBorderStyle = FormBorderStyle.None;
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(1100, 720);
-            MinimumSize = new Size(720, 480);
-            BackColor = WindowFrame;
-            ForeColor = TextMain;
-            Font = new Font("Segoe UI", 10f);
-            DoubleBuffered = true;
-            Padding = new Padding(1);
-
-            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
-            catch { }
-
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            InitKillOnCloseJob();
-            BuildChrome();
-            BuildHome();
-            BuildSession();
-            ShowHome();
-
-            _watchTimer = new System.Windows.Forms.Timer();
-            _watchTimer.Interval = 1000;
-            _watchTimer.Tick += delegate
-            {
-                CheckAllExited();
-                UpdateResourceStats();
-            };
-            _watchTimer.Start();
-
-            Shown += delegate { CheckPreviousSession(); };
-        }
-
-        // Sombra nativa de Windows (ventanas borderless)
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
-                return cp;
-            }
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            const int WM_NCHITTEST = 0x84;
-            const int HTCLIENT = 1;
-            const int HTLEFT = 10;
-            const int HTRIGHT = 11;
-            const int HTTOP = 12;
-            const int HTTOPLEFT = 13;
-            const int HTTOPRIGHT = 14;
-            const int HTBOTTOM = 15;
-            const int HTBOTTOMLEFT = 16;
-            const int HTBOTTOMRIGHT = 17;
-
-            if (m.Msg == WM_NCHITTEST && !_maximized)
-            {
-                // Prioridad a bordes/esquinas (sin base primero: los hijos no bloquean el grip)
-                int lp = m.LParam.ToInt32();
-                Point p = PointToClient(new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF)));
-                int g = 12;
-                bool left = p.X <= g;
-                bool right = p.X >= ClientSize.Width - g;
-                bool top = p.Y <= g;
-                bool bottom = p.Y >= ClientSize.Height - g;
-
-                if (top && left) { m.Result = (IntPtr)HTTOPLEFT; return; }
-                if (top && right) { m.Result = (IntPtr)HTTOPRIGHT; return; }
-                if (bottom && left) { m.Result = (IntPtr)HTBOTTOMLEFT; return; }
-                if (bottom && right) { m.Result = (IntPtr)HTBOTTOMRIGHT; return; }
-                if (left) { m.Result = (IntPtr)HTLEFT; return; }
-                if (right) { m.Result = (IntPtr)HTRIGHT; return; }
-                if (top) { m.Result = (IntPtr)HTTOP; return; }
-                if (bottom) { m.Result = (IntPtr)HTBOTTOM; return; }
-
-                m.Result = (IntPtr)HTCLIENT;
-                return;
-            }
-
-            base.WndProc(ref m);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            Rectangle r = ClientRectangle;
-            if (r.Width < 8 || r.Height < 8) return;
-
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            int radius = _maximized ? 0 : 26;
-
-            if (radius > 0)
-            {
-                using (GraphicsPath path = RoundRect(new Rectangle(0, 0, r.Width - 1, r.Height - 1), radius))
-                using (Pen outer = new Pen(WindowFrame, 1.5f))
-                using (Pen inner = new Pen(Color.FromArgb(255, 255, 255), 1))
-                {
-                    e.Graphics.DrawPath(outer, path);
-                    if (Padding.All > 0)
-                    {
-                        using (GraphicsPath path2 = RoundRect(new Rectangle(1, 1, r.Width - 3, r.Height - 3), Math.Max(4, radius - 2)))
-                            e.Graphics.DrawPath(inner, path2);
-                    }
-                }
-            }
-            else
-            {
-                using (Pen outer = new Pen(WindowFrame, 1))
-                    e.Graphics.DrawRectangle(outer, 0, 0, r.Width - 1, r.Height - 1);
-            }
-        }
-
-        void ApplyWindowFrame()
-        {
-            if (_maximized)
-            {
-                Padding = new Padding(0);
-                BackColor = Bg;
-                Region = null;
-            }
-            else
-            {
-                Padding = new Padding(1);
-                BackColor = WindowFrame;
-                // Sin Region redondeada: cortaba las esquinas y bloqueaba el resize
-                Region = null;
-                TryEnableWin11Corners();
-            }
-            Invalidate();
-        }
-
-        protected override void OnHandleCreated(EventArgs e)
-        {
-            base.OnHandleCreated(e);
-            TryEnableWin11Corners();
-        }
-
-        protected override void OnSizeChanged(EventArgs e)
-        {
-            base.OnSizeChanged(e);
-            LayoutHomeTiles();
-            LayoutStatsBar();
-            LayoutToolbarButtons();
-            if (_sessionPanel != null && _sessionPanel.Visible)
-            {
-                try
-                {
-                    if (_split != null && !_split.Panel1Collapsed && _split.Width > 400)
-                        SafeConfigureSplit(true);
-                }
-                catch { }
-            }
-        }
-
-        void TryEnableWin11Corners()
-        {
-            try
-            {
-                if (!IsHandleCreated) return;
-                int preference = 2; // DWMWCP_ROUND
-                DwmSetWindowAttribute(Handle, 33, ref preference, sizeof(int));
-            }
-            catch { }
-        }
-
-        void ApplyRoundedRegion()
-        {
-            // Desactivado a propósito: CreateRoundRectRgn elimina píxeles de esquina
-            // y evita HTTOPLEFT/HTTOPRIGHT. El redondeo visual va por DWM + OnPaint.
-            Region = null;
-        }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
@@ -334,358 +99,67 @@ namespace AppInWhats
             return start;
         }
 
-        void BuildChrome()
+
+        static bool IsOtrosSection(HomeSection section)
         {
-            _titleBar = new Panel();
-            _titleBar.Dock = DockStyle.Top;
-            _titleBar.Height = 40;
-            _titleBar.BackColor = TitleBar;
-            _titleBar.MouseDown += BeginWindowDrag;
-            _titleBar.DoubleClick += TitleBarDoubleClick;
-            _titleBar.Resize += delegate { LayoutCaptionButtons(); };
-
-            // Línea separadora dedicada (no la tapán los botones de caption)
-            _titleSep = new Panel();
-            _titleSep.Dock = DockStyle.Bottom;
-            _titleSep.Height = 1;
-            _titleSep.BackColor = Border;
-
-            PictureBox brandIcon = new PictureBox();
-            brandIcon.Size = new Size(18, 18);
-            brandIcon.Location = new Point(14, 11);
-            brandIcon.SizeMode = PictureBoxSizeMode.Zoom;
-            brandIcon.BackColor = Color.Transparent;
-            try { if (Icon != null) brandIcon.Image = Icon.ToBitmap(); } catch { }
-            brandIcon.MouseDown += BeginWindowDrag;
-            brandIcon.DoubleClick += TitleBarDoubleClick;
-
-            Label brand = MakeDragLabel("AppInWhats DevBuild", new Font("Segoe UI Semibold", 10.5f, FontStyle.Bold), TextMain, new Point(38, 10));
-            Label hint = MakeDragLabel("desarrollo", new Font("Segoe UI", 9f), TextMuted, new Point(230, 11));
-            brand.DoubleClick += TitleBarDoubleClick;
-            hint.DoubleClick += TitleBarDoubleClick;
-
-            const int capW = 46;
-            _capMin = new CaptionButton(CaptionKind.Minimize, new Action(MinimizeWindow));
-            _capMax = new CaptionButton(CaptionKind.Maximize, new Action(ToggleMaximize));
-            _capClose = new CaptionButton(CaptionKind.Close, new Action(Close));
-            _capMin.Width = capW;
-            _capMax.Width = capW;
-            _capClose.Width = capW;
-
-            _titleBar.Controls.Add(_titleSep);
-            _titleBar.Controls.Add(brandIcon);
-            _titleBar.Controls.Add(brand);
-            _titleBar.Controls.Add(hint);
-            _titleBar.Controls.Add(_capMin);
-            _titleBar.Controls.Add(_capMax);
-            _titleBar.Controls.Add(_capClose);
-            _titleSep.BringToFront();
-            Controls.Add(_titleBar);
-            LayoutCaptionButtons();
-
-            Panel footer = new Panel();
-            footer.Dock = DockStyle.Bottom;
-            footer.Height = 40;
-            footer.BackColor = PanelBg;
-            footer.Paint += delegate(object s, PaintEventArgs e)
-            {
-                using (Pen pen = new Pen(Border, 1))
-                    e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
-            };
-
-            _status = new Label();
-            _status.Text = _root;
-            _status.AutoEllipsis = true;
-            _status.ForeColor = TextMuted;
-            _status.Font = new Font("Segoe UI", 8f);
-            _status.Dock = DockStyle.Fill;
-            _status.TextAlign = ContentAlignment.MiddleLeft;
-            _status.Padding = new Padding(16, 0, 16, 0);
-            footer.Controls.Add(_status);
-            Controls.Add(footer);
+            return section != null && string.Equals(section.Id, "Otros", StringComparison.OrdinalIgnoreCase);
         }
 
-        void LayoutCaptionButtons()
+        void EnsureOtrosLast()
         {
-            if (_titleBar == null || _capClose == null) return;
-            int w = _capClose.Width;
-            int h = Math.Max(1, _titleBar.Height - (_titleSep != null ? _titleSep.Height : 1));
-            _capClose.Size = new Size(w, h);
-            _capMax.Size = new Size(w, h);
-            _capMin.Size = new Size(w, h);
-            _capClose.Location = new Point(_titleBar.Width - w, 0);
-            _capMax.Location = new Point(_titleBar.Width - w * 2, 0);
-            _capMin.Location = new Point(_titleBar.Width - w * 3, 0);
-            if (_titleSep != null) _titleSep.BringToFront();
-            _capClose.BringToFront();
-            _capMax.BringToFront();
-            _capMin.BringToFront();
-            if (_titleSep != null) _titleSep.BringToFront();
+            HomeSection otros = null;
+            for (int i = 0; i < _homeSections.Count; i++)
+            {
+                if (IsOtrosSection(_homeSections[i]))
+                {
+                    otros = _homeSections[i];
+                    break;
+                }
+            }
+            if (otros == null) return;
+            _homeSections.Remove(otros);
+            _homeSections.Add(otros);
         }
 
-        void BuildHome()
+        void MoveHomeSection(HomeSection section, int delta)
         {
-            _homePanel = new DoubleBufferedPanel();
-            _homePanel.Dock = DockStyle.Fill;
-            _homePanel.BackColor = Bg;
-
-            _resumeBanner = new Panel();
-            _resumeBanner.Dock = DockStyle.Top;
-            _resumeBanner.Height = 56;
-            _resumeBanner.BackColor = Color.FromArgb(255, 244, 229);
-            _resumeBanner.Visible = false;
-            _resumeBanner.Paint += delegate(object s, PaintEventArgs e)
-            {
-                using (Pen pen = new Pen(Color.FromArgb(245, 158, 11), 1))
-                    e.Graphics.DrawLine(pen, 0, _resumeBanner.Height - 1, _resumeBanner.Width, _resumeBanner.Height - 1);
-            };
-
-            _resumeLabel = new Label();
-            _resumeLabel.AutoSize = false;
-            _resumeLabel.Location = new Point(20, 10);
-            _resumeLabel.Size = new Size(620, 36);
-            _resumeLabel.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
-            _resumeLabel.ForeColor = Color.FromArgb(146, 64, 14);
-            _resumeLabel.BackColor = Color.Transparent;
-            _resumeLabel.TextAlign = ContentAlignment.MiddleLeft;
-
-            RoundedButton btnResume = MakeToolButton("Abrir sesión", Accent, Color.White);
-            btnResume.Size = new Size(120, 34);
-            btnResume.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnResume.Click += delegate { ResumePreviousSession(); };
-
-            RoundedButton btnKillPrev = MakeToolButton("Detener", Danger, Color.White);
-            btnKillPrev.Size = new Size(100, 34);
-            btnKillPrev.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnKillPrev.Click += delegate
-            {
-                KillSessionFromFile();
-                HideResumeBanner();
-                _status.Text = "Sesión anterior detenida";
-                _status.ForeColor = Accent;
-            };
-
-            _resumeBanner.Controls.Add(_resumeLabel);
-            _resumeBanner.Controls.Add(btnResume);
-            _resumeBanner.Controls.Add(btnKillPrev);
-            _resumeBanner.Resize += delegate
-            {
-                btnKillPrev.Location = new Point(_resumeBanner.Width - btnKillPrev.Width - 16, 12);
-                btnResume.Location = new Point(btnKillPrev.Left - btnResume.Width - 8, 12);
-                _resumeLabel.Width = Math.Max(200, btnResume.Left - 32);
-            };
-
-            Label intro = new Label();
-            intro.Text = "Elige un modo";
-            intro.Font = new Font("Segoe UI Semibold", 20f, FontStyle.Bold);
-            intro.ForeColor = TextMain;
-            intro.AutoSize = true;
-            intro.Location = new Point(28, 16);
-            intro.BackColor = Color.Transparent;
-
-            Label introSub = new Label();
-            introSub.Text = "Las terminales de frontend y backend se abrirán en esta ventana";
-            introSub.Font = new Font("Segoe UI", 9.5f);
-            introSub.ForeColor = TextMuted;
-            introSub.AutoSize = true;
-            introSub.Location = new Point(30, 52);
-            introSub.BackColor = Color.Transparent;
-
-            _homeScrollHost = new DoubleBufferedPanel();
-            _homeScrollHost.Location = new Point(0, 90);
-            _homeScrollHost.BackColor = Bg;
-            _homeScrollHost.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-
-            _homeScrollBar = new ModernVScrollBar();
-            _homeScrollBar.Dock = DockStyle.Right;
-            _homeScrollBar.Width = 12;
-            _homeScrollBar.Visible = true;
-            _homeScrollBar.Scroll += delegate { ApplyHomeScroll(); };
-
-            _homeViewport = new DoubleBufferedPanel();
-            _homeViewport.Dock = DockStyle.Fill;
-            _homeViewport.BackColor = Bg;
-            _homeViewport.Padding = new Padding(0);
-
-            _tileGrid = new DoubleBufferedPanel();
-            _tileGrid.Location = new Point(0, 0);
-            _tileGrid.BackColor = Bg;
-
-            const int tw = 168;
-            const int th = 168;
-            _homeSections.Clear();
-
-            Dictionary<string, HomeSection> byId = new Dictionary<string, HomeSection>(StringComparer.OrdinalIgnoreCase);
-            byId["Native"] = MakeHomeSection(
-                "Native",
-                "Native",
-                "Sin Docker · más ligero y rápido de arrancar",
-                Color.FromArgb(0, 180, 120),
-                new TileInfo[]
-                {
-                    new TileInfo("Native", "Local", "Sin Docker · ligero", Color.FromArgb(0, 180, 120), "N", new Action(StartNativeLocal)),
-                    new TileInfo("Native", "Remote", "API remota", Color.FromArgb(0, 150, 230), "R", new Action(StartNativeRemote)),
-                }, tw, th);
-            byId["Docker"] = MakeHomeSection(
-                "Docker",
-                "Docker",
-                "Stack en contenedores · local, remoto u optimizado",
-                Color.FromArgb(80, 140, 220),
-                new TileInfo[]
-                {
-                    new TileInfo("Docker", "Local", "Stack completo", Color.FromArgb(80, 140, 220), "D", new Action(StartDockerLocal)),
-                    new TileInfo("Docker", "Remote", "Front + API remota", Color.FromArgb(230, 160, 40), "⇄", new Action(StartDockerRemote)),
-                    new TileInfo("Optimizado", "Docker", "Menos CPU/RAM", Color.FromArgb(40, 170, 160), "⚡", new Action(StartOptLocal)),
-                    new TileInfo("Optimizado", "Remote", "Opt + remoto", Color.FromArgb(70, 140, 210), "⚡", new Action(StartOptRemote)),
-                }, tw, th);
-            byId["Otros"] = MakeHomeSection(
-                "Otros",
-                "Otros",
-                "Utilidades del entorno de desarrollo",
-                Color.FromArgb(220, 90, 110),
-                new TileInfo[]
-                {
-                    new TileInfo("Instalar", "npm", "Dependencias", Color.FromArgb(220, 90, 110), "↓", new Action(StartInstall)),
-                    new TileInfo("Compilar", "front", "Production · abre dist", Color.FromArgb(90, 100, 120), "⚙", new Action(StartCompileFrontFromHome)),
-                }, tw, th);
-            byId["Servidor"] = MakeHomeSection(
-                "Servidor",
-                "Servidor",
-                "Ejecuta back/front en Debian remoto · sin consumir PC local",
-                Color.FromArgb(90, 100, 140),
-                new TileInfo[]
-                {
-                    new TileInfo("Servidor", "SSH", "IP · puerto 1231", Color.FromArgb(90, 100, 140), "☁", new Action(StartServerMode)),
-                }, tw, th);
-
-            string[] defaultOrder = new string[] { "Native", "Docker", "Otros", "Servidor" };
-            List<string> order = LoadHomeSectionOrder(defaultOrder);
-            HashSet<string> used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < order.Count; i++)
-            {
-                HomeSection sec;
-                if (byId.TryGetValue(order[i], out sec) && used.Add(order[i]))
-                    _homeSections.Add(sec);
-            }
-            for (int i = 0; i < defaultOrder.Length; i++)
-            {
-                if (used.Add(defaultOrder[i]))
-                    _homeSections.Add(byId[defaultOrder[i]]);
-            }
-
-            Label orderHint = new Label();
-            orderHint.Text = "Arrastra ⋮⋮ en cada categoría para reordenar · se guarda al soltar";
-            orderHint.Font = new Font("Segoe UI", 8.5f);
-            orderHint.ForeColor = TextMuted;
-            orderHint.AutoSize = true;
-            orderHint.Location = new Point(30, 72);
-            orderHint.BackColor = Color.Transparent;
-            _homeViewport.Controls.Add(_tileGrid);
-            _homeScrollHost.Controls.Add(_homeViewport);
-            _homeScrollHost.Controls.Add(_homeScrollBar);
-            _homeScrollHost.MouseWheel += HomeMouseWheel;
-            _homeViewport.MouseWheel += HomeMouseWheel;
-            _tileGrid.MouseWheel += HomeMouseWheel;
-
-            _homeContent = new DoubleBufferedPanel();
-            _homeContent.Dock = DockStyle.Fill;
-            _homeContent.BackColor = Bg;
-            _homeContent.Controls.Add(intro);
-            _homeContent.Controls.Add(introSub);
-            _homeContent.Controls.Add(orderHint);
-            _homeContent.Controls.Add(_homeScrollHost);
-            _homeContent.Resize += delegate { LayoutHomeTiles(); };
-
-            _homePanel.Controls.Add(_homeContent);
-            _homePanel.Controls.Add(_resumeBanner);
-            Controls.Add(_homePanel);
-            _homePanel.BringToFront();
+            if (section == null || IsOtrosSection(section)) return;
+            int oldIndex = _homeSections.IndexOf(section);
+            if (oldIndex < 0) return;
+            int newIndex = oldIndex + delta;
+            if (newIndex < 0 || newIndex >= _homeSections.Count) return;
+            if (IsOtrosSection(_homeSections[newIndex])) return;
+            _homeSections.RemoveAt(oldIndex);
+            _homeSections.Insert(newIndex, section);
+            EnsureOtrosLast();
+            SaveHomeSectionOrder();
             LayoutHomeTiles();
+            UpdateSectionOrderButtons();
         }
 
-        void HomeMouseWheel(object sender, MouseEventArgs e)
+        void UpdateSectionOrderButtons()
         {
-            if (_homeScrollBar == null || !_homeScrollBar.Enabled) return;
-            int delta = e.Delta > 0 ? -48 : 48;
-            _homeScrollBar.Value = _homeScrollBar.Value + delta;
-        }
-
-        void ApplyHomeScroll()
-        {
-            if (_tileGrid == null || _homeScrollBar == null) return;
-            _tileGrid.Top = -_homeScrollBar.Value;
-        }
-
-        HomeSection MakeHomeSection(string id, string title, string subtitle, Color accent, TileInfo[] tiles, int tw, int th)
-        {
-            HomeSection section = new HomeSection();
-            section.Id = id;
-            section.Accent = accent;
-
-            SectionCard card = new SectionCard(accent);
-            card.BackColor = Bg;
-            section.Card = card;
-
-            Label titleLbl = new Label();
-            titleLbl.Text = title;
-            titleLbl.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
-            titleLbl.ForeColor = TextMain;
-            titleLbl.AutoSize = true;
-            titleLbl.Location = new Point(52, 14);
-            titleLbl.BackColor = Color.Transparent;
-
-            Label subLbl = new Label();
-            subLbl.Text = subtitle;
-            subLbl.Font = new Font("Segoe UI", 8.75f);
-            subLbl.ForeColor = TextMuted;
-            subLbl.AutoSize = true;
-            subLbl.Location = new Point(54, 38);
-            subLbl.BackColor = Color.Transparent;
-
-            Label grip = new Label();
-            grip.Text = "⋮⋮";
-            grip.Font = new Font("Segoe UI Semibold", 14f, FontStyle.Bold);
-            grip.ForeColor = Color.FromArgb(160, 168, 180);
-            grip.AutoSize = true;
-            grip.BackColor = Color.Transparent;
-            grip.Cursor = Cursors.SizeAll;
-            grip.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            section.DragHandle = grip;
-
-            card.Controls.Add(titleLbl);
-            card.Controls.Add(subLbl);
-            card.Controls.Add(grip);
-
-            for (int i = 0; i < tiles.Length; i++)
+            EnsureOtrosLast();
+            for (int i = 0; i < _homeSections.Count; i++)
             {
-                Control tile = CreateTile(tiles[i], tw, th);
-                card.Controls.Add(tile);
-                section.Tiles.Add(tile);
+                HomeSection s = _homeSections[i];
+                if (s == null) continue;
+                bool otros = IsOtrosSection(s);
+                bool canUp = !otros && i > 0;
+                bool canDown = !otros && i < _homeSections.Count - 1 && !IsOtrosSection(_homeSections[i + 1]);
+                if (s.BtnUp != null)
+                {
+                    s.BtnUp.Enabled = canUp;
+                    s.BtnUp.Visible = !otros;
+                }
+                if (s.BtnDown != null)
+                {
+                    s.BtnDown.Enabled = canDown;
+                    s.BtnDown.Visible = !otros;
+                }
+                if (s.DragHandle != null)
+                    s.DragHandle.Visible = !otros;
             }
-
-            WireSectionDrag(section, grip);
-            WireSectionDrag(section, titleLbl);
-            WireSectionDrag(section, subLbl);
-            card.MouseMove += delegate(object s, MouseEventArgs e)
-            {
-                if (_draggingSection && _dragSection == section)
-                    MoveSectionDrag(e);
-            };
-            card.MouseUp += delegate(object s, MouseEventArgs e)
-            {
-                if (e.Button == MouseButtons.Left)
-                    EndSectionDrag();
-            };
-
-            card.Resize += delegate
-            {
-                if (section.DragHandle != null)
-                    section.DragHandle.Location = new Point(Math.Max(60, card.Width - 36), 16);
-            };
-
-            _tileGrid.Controls.Add(card);
-            WireHomeWheel(card);
-            return section;
         }
 
         void WireSectionDrag(HomeSection section, Control handle)
@@ -711,10 +185,11 @@ namespace AppInWhats
 
         void BeginSectionDrag(HomeSection section, MouseEventArgs e)
         {
-            if (section == null || section.Card == null) return;
+            if (section == null || section.Card == null || IsOtrosSection(section)) return;
             _draggingSection = true;
             _dragSection = section;
             Point grid = _tileGrid.PointToClient(Control.MousePosition);
+            _dragOffsetX = grid.X - section.Card.Left;
             _dragOffsetY = grid.Y - section.Card.Top;
             section.Card.BringToFront();
             section.Card.Cursor = Cursors.SizeAll;
@@ -725,11 +200,15 @@ namespace AppInWhats
         {
             if (!_draggingSection || _dragSection == null || _dragSection.Card == null) return;
             Point grid = _tileGrid.PointToClient(Control.MousePosition);
+            int newLeft = grid.X - _dragOffsetX;
             int newTop = grid.Y - _dragOffsetY;
+            if (newLeft < 0) newLeft = 0;
             if (newTop < 0) newTop = 0;
+            int maxLeft = Math.Max(0, _tileGrid.Width - _dragSection.Card.Width);
             int maxTop = Math.Max(0, _tileGrid.Height - _dragSection.Card.Height);
+            if (newLeft > maxLeft) newLeft = maxLeft;
             if (newTop > maxTop) newTop = maxTop;
-            _dragSection.Card.Top = newTop;
+            _dragSection.Card.Location = new Point(newLeft, newTop);
 
             if (_homeScrollBar != null && _homeScrollBar.Enabled && _homeViewport != null)
             {
@@ -756,16 +235,21 @@ namespace AppInWhats
             HomeSection moving = _dragSection;
             try { if (moving.Card != null) moving.Card.Capture = false; } catch { }
 
-            int center = moving.Card.Top + moving.Card.Height / 2;
+            int cx = moving.Card.Left + moving.Card.Width / 2;
+            int cy = moving.Card.Top + moving.Card.Height / 2;
             int oldIndex = _homeSections.IndexOf(moving);
             int newIndex = _homeSections.Count - 1;
 
             for (int i = 0; i < _homeSections.Count; i++)
             {
                 HomeSection other = _homeSections[i];
-                if (other == moving || other.Card == null) continue;
-                int mid = other.Card.Top + other.Card.Height / 2;
-                if (center < mid)
+                if (other == moving || other.Card == null || IsOtrosSection(other)) continue;
+                int ocx = other.Card.Left + other.Card.Width / 2;
+                int ocy = other.Card.Top + other.Card.Height / 2;
+                bool before =
+                    cy < ocy - Math.Max(12, other.Card.Height / 4) ||
+                    (Math.Abs(cy - ocy) <= Math.Max(other.Card.Height, moving.Card.Height) / 2 && cx < ocx);
+                if (before)
                 {
                     newIndex = _homeSections.IndexOf(other);
                     if (oldIndex >= 0 && newIndex > oldIndex) newIndex--;
@@ -775,17 +259,20 @@ namespace AppInWhats
             if (newIndex < 0) newIndex = 0;
             if (newIndex >= _homeSections.Count) newIndex = _homeSections.Count - 1;
 
-            if (oldIndex >= 0 && oldIndex != newIndex)
+            if (oldIndex >= 0 && oldIndex != newIndex && !IsOtrosSection(moving))
             {
                 _homeSections.RemoveAt(oldIndex);
                 _homeSections.Insert(newIndex, moving);
-                SaveHomeSectionOrder();
             }
+
+            EnsureOtrosLast();
+            SaveHomeSectionOrder();
 
             if (moving.Card != null) moving.Card.Cursor = Cursors.Default;
             _draggingSection = false;
             _dragSection = null;
             LayoutHomeTiles();
+            UpdateSectionOrderButtons();
         }
 
         List<string> LoadHomeSectionOrder(string[] defaults)
@@ -817,6 +304,7 @@ namespace AppInWhats
         {
             try
             {
+                EnsureOtrosLast();
                 if (string.IsNullOrEmpty(_homeLayoutPath)) return;
                 string dir = Path.GetDirectoryName(_homeLayoutPath);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
@@ -842,407 +330,7 @@ namespace AppInWhats
                 WireHomeWheel(root.Controls[i]);
         }
 
-        void LayoutHomeTiles()
-        {
-            if (_homeScrollHost == null || _homeContent == null || _homeSections.Count == 0) return;
-            if (_homeContent.ClientSize.Width <= 0 || _homeContent.ClientSize.Height <= 0) return;
 
-            const int tw = 168;
-            const int th = 168;
-            const int gap = 16;
-            const int padLeft = 28;
-            const int padRight = 8;
-            const int top = 98;
-            const int sectionGap = 18;
-            const int headerH = 64;
-            const int cardPad = 16;
-            const int bottomPad = 20;
-            const int barW = 12;
-
-            int hostH = Math.Max(120, _homeContent.ClientSize.Height - top);
-            int hostW = Math.Max(200, _homeContent.ClientSize.Width);
-            _homeScrollHost.Location = new Point(0, top);
-            _homeScrollHost.Size = new Size(hostW, hostH);
-
-            // Siempre reserva la franja derecha: evita bucles al mostrar/ocultar la barra
-            if (_homeScrollBar != null)
-            {
-                _homeScrollBar.Visible = true;
-                _homeScrollBar.Width = barW;
-            }
-
-            int viewportW = Math.Max(180, hostW - barW);
-            int viewportH = Math.Max(80, hostH);
-            int contentW = Math.Max(tw + cardPad * 2, viewportW - padLeft - padRight);
-            int innerW = Math.Max(tw, contentW - cardPad * 2);
-            int cols = Math.Max(1, (innerW + gap) / (tw + gap));
-            int y = 4;
-
-            for (int s = 0; s < _homeSections.Count; s++)
-            {
-                HomeSection section = _homeSections[s];
-                if (section.Card == null) continue;
-
-                int sectionCols = cols;
-                if (sectionCols > section.Tiles.Count) sectionCols = Math.Max(1, section.Tiles.Count);
-                int rows = (section.Tiles.Count + sectionCols - 1) / sectionCols;
-                if (rows < 1) rows = 1;
-
-                int tilesH = rows * th + Math.Max(0, rows - 1) * gap;
-                int cardH = headerH + tilesH + cardPad;
-
-                section.Card.Location = new Point(padLeft, y);
-                section.Card.Size = new Size(contentW, cardH);
-
-                for (int i = 0; i < section.Tiles.Count; i++)
-                {
-                    int col = i % sectionCols;
-                    int row = i / sectionCols;
-                    section.Tiles[i].Location = new Point(
-                        cardPad + col * (tw + gap),
-                        headerH + row * (th + gap));
-                }
-
-                y += cardH + sectionGap;
-            }
-
-            int contentH = y + bottomPad;
-            _tileGrid.Width = Math.Max(viewportW, contentW + padLeft);
-            _tileGrid.Height = Math.Max(viewportH, contentH);
-
-            int maxScroll = Math.Max(0, contentH - viewportH);
-            if (_homeScrollBar != null)
-            {
-                _homeScrollBar.Minimum = 0;
-                _homeScrollBar.LargeChange = Math.Max(1, viewportH);
-                _homeScrollBar.Maximum = Math.Max(viewportH, contentH);
-                if (_homeScrollBar.Value > maxScroll) _homeScrollBar.Value = maxScroll;
-                _homeScrollBar.Enabled = maxScroll > 0;
-                ApplyHomeScroll();
-            }
-        }
-
-        void BuildSession()
-        {
-            _sessionPanel = new Panel();
-            _sessionPanel.Dock = DockStyle.Fill;
-            _sessionPanel.BackColor = Bg;
-            _sessionPanel.Visible = false;
-
-            _toolbar = new Panel();
-            _toolbar.Dock = DockStyle.Top;
-            _toolbar.Height = 56;
-            _toolbar.BackColor = PanelBg;
-            _toolbar.Padding = new Padding(16, 10, 16, 10);
-
-            _sessionTitle = new Label();
-            _sessionTitle.Text = "Sesión";
-            _sessionTitle.Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold);
-            _sessionTitle.ForeColor = TextMain;
-            _sessionTitle.AutoSize = true;
-            _sessionTitle.Location = new Point(20, 16);
-            _sessionTitle.BackColor = Color.Transparent;
-
-            _btnStop = MakeToolButton("Parar todo", Danger, Color.White);
-            _btnStop.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _btnStop.Click += delegate { StopAll(true); };
-
-            _btnStart = MakeToolButton("Iniciar aplicación", Accent, Color.White);
-            _btnStart.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _btnStart.Enabled = false;
-            _btnStart.Click += delegate { RestartCurrentMode(); };
-
-            _btnOpen = MakeToolButton("Abrir app", Color.FromArgb(70, 130, 180), Color.White);
-            _btnOpen.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _btnOpen.Click += delegate { OpenAppInBrowser(); };
-
-            _btnBuild = MakeToolButton("Compilar front", Color.FromArgb(90, 100, 120), Color.White);
-            _btnBuild.Size = new Size(132, 34);
-            _btnBuild.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _btnBuild.Click += delegate { StartFrontendProductionBuild(); };
-
-            _btnHome = MakeToolButton("Inicio", Color.FromArgb(240, 240, 240), TextMain);
-            _btnHome.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _btnHome.Enabled = false;
-            _btnHome.Click += delegate
-            {
-                if (_running)
-                {
-                    DialogResult r = MessageBox.Show(
-                        "Hay procesos en marcha. ¿Pararlos y volver al inicio?",
-                        "AppInWhats", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (r != DialogResult.Yes) return;
-                    StopAll(false);
-                }
-                ShowHome();
-            };
-
-            _toolbar.Controls.Add(_sessionTitle);
-            _toolbar.Controls.Add(_btnStop);
-            _toolbar.Controls.Add(_btnStart);
-            _toolbar.Controls.Add(_btnOpen);
-            _toolbar.Controls.Add(_btnBuild);
-            _toolbar.Controls.Add(_btnHome);
-            _toolbar.Resize += delegate { LayoutToolbarButtons(); };
-
-            _serverBar = new DoubleBufferedPanel();
-            _serverBar.Dock = DockStyle.Top;
-            _serverBar.Height = 48;
-            _serverBar.BackColor = Color.FromArgb(245, 247, 250);
-            _serverBar.Visible = false;
-            _serverBar.Paint += delegate(object s, PaintEventArgs e)
-            {
-                using (Pen pen = new Pen(Border, 1))
-                    e.Graphics.DrawLine(pen, 0, _serverBar.Height - 1, _serverBar.Width, _serverBar.Height - 1);
-            };
-
-            _btnSyncBack = MakeToolButton("Enviar backend", Color.FromArgb(124, 58, 237), Color.White);
-            _btnSyncFront = MakeToolButton("Enviar frontend", Accent, Color.White);
-            _btnSyncBoth = MakeToolButton("Enviar ambos", Color.FromArgb(90, 100, 140), Color.White);
-            _btnSyncBack.Click += delegate { RunServerAction("deploy-backend", true); };
-            _btnSyncFront.Click += delegate { RunServerAction("deploy-frontend", false); };
-            _btnSyncBoth.Click += delegate { RunServerAction("deploy-both", true); };
-            _serverBar.Controls.Add(_btnSyncBack);
-            _serverBar.Controls.Add(_btnSyncFront);
-            _serverBar.Controls.Add(_btnSyncBoth);
-            _serverBar.Resize += delegate { LayoutServerBar(); };
-
-            _statsBar = new DoubleBufferedPanel();
-            _statsBar.Dock = DockStyle.Top;
-            _statsBar.Height = 48;
-            _statsBar.BackColor = Color.FromArgb(250, 251, 253);
-            _statsBar.Paint += delegate(object s, PaintEventArgs e)
-            {
-                using (Pen pen = new Pen(Border, 1))
-                    e.Graphics.DrawLine(pen, 0, _statsBar.Height - 1, _statsBar.Width, _statsBar.Height - 1);
-            };
-
-            _statsBack = MakeStatsChip("Backend", Color.FromArgb(124, 58, 237));
-            _statsFront = MakeStatsChip("Frontend", Accent);
-            _statsOther = MakeStatsChip("Otros", Color.FromArgb(100, 116, 139));
-            _statsTotal = MakeStatsChip("Total", TextMain);
-
-            _statsBar.Controls.Add(_statsBack);
-            _statsBar.Controls.Add(_statsFront);
-            _statsBar.Controls.Add(_statsOther);
-            _statsBar.Controls.Add(_statsTotal);
-            _statsBar.Resize += delegate { LayoutStatsBar(); };
-
-            _split = new SplitContainer();
-            _split.Dock = DockStyle.Fill;
-            _split.SplitterWidth = 6;
-            _split.BackColor = Border;
-
-            _termBack = new TerminalView("Backend", Color.FromArgb(124, 58, 237), Path.Combine(_root, "backend"));
-            _termFront = new TerminalView("Frontend", Accent, Path.Combine(_root, "frontend"));
-            _termBack.BeforeBranchSwitch = StopForBranchSwitch;
-            _termFront.BeforeBranchSwitch = StopForBranchSwitch;
-            _termBack.AfterBranchSwitchSuccess = RestartAfterBranchSwitch;
-            _termFront.AfterBranchSwitchSuccess = RestartAfterBranchSwitch;
-            _termBack.Dock = DockStyle.Fill;
-            _termFront.Dock = DockStyle.Fill;
-            _split.Panel1.Controls.Add(_termBack);
-            _split.Panel2.Controls.Add(_termFront);
-
-            // orden Dock: Fill primero, luego Top (stats / server / toolbar)
-            _sessionPanel.Controls.Add(_split);
-            _sessionPanel.Controls.Add(_statsBar);
-            _sessionPanel.Controls.Add(_serverBar);
-            _sessionPanel.Controls.Add(_toolbar);
-            Controls.Add(_sessionPanel);
-            LayoutStatsBar();
-            LayoutServerBar();
-        }
-
-        StatsChip MakeStatsChip(string role, Color accent)
-        {
-            StatsChip chip = new StatsChip(role, accent);
-            chip.Size = new Size(220, 32);
-            return chip;
-        }
-
-        void LayoutStatsBar()
-        {
-            if (_statsBar == null || _statsBack == null) return;
-            int gap = 8;
-            int x = 12;
-            int inner = Math.Max(200, _statsBar.ClientSize.Width - 24);
-            int w = Math.Max(140, (inner - gap * 3) / 4);
-            StatsChip[] chips = new StatsChip[] { _statsBack, _statsFront, _statsOther, _statsTotal };
-            for (int i = 0; i < chips.Length; i++)
-            {
-                chips[i].Size = new Size(w, 32);
-                chips[i].Location = new Point(x, 8);
-                x += w + gap;
-            }
-            _statsBar.Visible = true;
-        }
-
-        void SafeConfigureSplit(bool dual)
-        {
-            try
-            {
-                _sessionPanel.PerformLayout();
-                _split.PerformLayout();
-
-                int w = _split.Width;
-                if (w < 100)
-                    w = Math.Max(100, ClientSize.Width - 20);
-
-                if (dual)
-                {
-                    _split.Panel1Collapsed = false;
-                    // márgenes seguros respecto al ancho real
-                    int min = Math.Max(80, Math.Min(200, (w - _split.SplitterWidth) / 4));
-                    _split.Panel1MinSize = min;
-                    _split.Panel2MinSize = min;
-                    int dist = w / 2;
-                    int maxDist = w - _split.Panel2MinSize - _split.SplitterWidth;
-                    if (dist < _split.Panel1MinSize) dist = _split.Panel1MinSize;
-                    if (dist > maxDist) dist = Math.Max(_split.Panel1MinSize, maxDist);
-                    if (maxDist >= _split.Panel1MinSize)
-                        _split.SplitterDistance = dist;
-                }
-                else
-                {
-                    _split.Panel1MinSize = 0;
-                    _split.Panel2MinSize = 0;
-                    _split.Panel1Collapsed = true;
-                }
-            }
-            catch
-            {
-                try { _split.Panel1Collapsed = !dual; } catch { }
-            }
-        }
-
-        void LayoutToolbarButtons()
-        {
-            if (_toolbar == null || _btnStop == null) return;
-            _btnStop.Location = new Point(_toolbar.Width - _btnStop.Width - 20, 12);
-            _btnStart.Location = new Point(_btnStop.Left - _btnStart.Width - 10, 12);
-            _btnOpen.Location = new Point(_btnStart.Left - _btnOpen.Width - 10, 12);
-            _btnBuild.Location = new Point(_btnOpen.Left - _btnBuild.Width - 10, 12);
-            _btnHome.Location = new Point(_btnBuild.Left - _btnHome.Width - 10, 12);
-        }
-
-        void LayoutServerBar()
-        {
-            if (_serverBar == null || _btnSyncBoth == null) return;
-            int x = 16;
-            _btnSyncBack.Location = new Point(x, 8);
-            x += _btnSyncBack.Width + 8;
-            _btnSyncFront.Location = new Point(x, 8);
-            x += _btnSyncFront.Width + 8;
-            _btnSyncBoth.Location = new Point(x, 8);
-        }
-
-        bool IsServerMode()
-        {
-            return string.Equals(_modeId, "server", StringComparison.OrdinalIgnoreCase);
-        }
-
-        void UpdateServerBarVisibility()
-        {
-            if (_serverBar == null) return;
-            _serverBar.Visible = IsServerMode();
-            if (_btnBuild != null) _btnBuild.Visible = !IsServerMode();
-            LayoutToolbarButtons();
-            LayoutServerBar();
-        }
-
-        RoundedButton MakeToolButton(string text, Color bg, Color fg)
-        {
-            RoundedButton b = new RoundedButton(text, bg, fg);
-            b.Size = new Size(Math.Max(108, TextRenderer.MeasureText(text, b.Font).Width + 28), 34);
-            return b;
-        }
-
-        void ShowHome()
-        {
-            _sessionPanel.Visible = false;
-            _homePanel.Visible = true;
-            _homePanel.BringToFront();
-            _status.Text = _root;
-            _status.ForeColor = TextMuted;
-            if (_serverBar != null) _serverBar.Visible = false;
-            if (_btnBuild != null) _btnBuild.Visible = true;
-        }
-
-        void ShowSession(string title, bool dual)
-        {
-            _homePanel.Visible = false;
-            _sessionPanel.Visible = true;
-            _sessionPanel.BringToFront();
-            _sessionTitle.Text = title;
-            _termBack.Clear();
-            _termFront.Clear();
-            _btnHome.Enabled = false;
-            _btnStop.Enabled = true;
-            if (_btnStart != null) _btnStart.Enabled = false;
-
-            if (dual)
-            {
-                if (IsServerMode())
-                {
-                    _termBack.SetTitle("Backend remoto (SSH)");
-                    _termFront.SetTitle("Frontend remoto · " + GetServerHostPortLabel());
-                }
-                else
-                {
-                    _termBack.SetTitle("Backend");
-                    _termFront.SetTitle("Frontend");
-                }
-            }
-            else
-            {
-                _termFront.SetTitle(title);
-            }
-
-            SafeConfigureSplit(dual);
-            LayoutToolbarButtons();
-            LayoutStatsBar();
-            UpdateServerBarVisibility();
-            ResetStatsDisplay();
-            if (_termBack != null) _termBack.RefreshGitBranch();
-            if (_termFront != null) _termFront.RefreshGitBranch();
-            if (_statsBar != null)
-            {
-                _statsBar.Visible = !IsServerMode();
-                _statsBar.Invalidate(true);
-            }
-        }
-
-        void ResetStatsDisplay()
-        {
-            if (_statsBack == null) return;
-            _statsBack.SetStatsText("Backend  ·  —");
-            _statsFront.SetStatsText("Frontend  ·  —");
-            _statsOther.SetStatsText("Otros  ·  —");
-            _statsTotal.SetStatsText("Total  ·  —");
-            _prevCpu.Clear();
-            _prevCpuSample = DateTime.MinValue;
-        }
-
-        void SetRunning(bool running)
-        {
-            _running = running;
-            _btnHome.Enabled = !running;
-            _btnStop.Enabled = running;
-            if (_btnStart != null)
-                _btnStart.Enabled = !running && !string.IsNullOrEmpty(_modeId);
-            _status.ForeColor = running ? Accent : TextMuted;
-            if (running && IsServerMode())
-                _status.Text = "Servidor remoto  ·  " + _serverAppUrl;
-            else
-                _status.Text = running ? "Ejecutando…  ·  http://localhost:50080" : "Detenido";
-            if (!running && !_closing)
-            {
-                ClearSessionFile();
-                ResetStatsDisplay();
-            }
-            UpdateServerBarVisibility();
-        }
 
         void RestartCurrentMode()
         {
@@ -1262,6 +350,7 @@ namespace AppInWhats
             switch (_modeId)
             {
                 case "native-local": StartNativeLocal(); break;
+                case "native-legacy": StartNativeLegacy(); break;
                 case "native-remote": StartNativeRemote(); break;
                 case "docker-local": StartDockerLocal(); break;
                 case "docker-remote": StartDockerRemote(); break;
@@ -1270,6 +359,7 @@ namespace AppInWhats
                 case "install": StartInstall(); break;
                 case "server": StartServerMode(); break;
                 case "compile-front": StartCompileFrontFromHome(); break;
+                case "compile-plesk": StartCompileAndUploadPlesk(); break;
                 default:
                     MessageBox.Show("Modo desconocido: " + _modeId, "AppInWhats DevBuild",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1426,7 +516,7 @@ namespace AppInWhats
                 psi.FileName = "powershell.exe";
                 psi.Arguments =
                     "-NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='node.exe'\\\" -ErrorAction SilentlyContinue | " +
-                    "Where-Object { $_.CommandLine -match 'AppInWhats\\\\\\\\(frontend|backend)|ng serve|ts-node scr|nodemon' } | " +
+                    "Where-Object { $_.CommandLine -match 'AppInWhats\\\\\\\\(frontend|backend)|ng serve|nest start|ts-node|nodemon' } | " +
                     "ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null }\"";
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
@@ -1442,19 +532,30 @@ namespace AppInWhats
         {
             if (!EnsureCanStart() || !EnsureNpx()) return;
             FreeDevPorts();
-            BeginMode("Native · Local", true, false, false, false, "native-local");
+            BeginMode("Native · Nest", true, false, false, false, "native-local");
 
             string backend = Path.Combine(_root, "backend");
             string frontend = Path.Combine(_root, "frontend");
             string cfg = Path.Combine(backend, "config.cfg");
+            string mainTs = Path.Combine(backend, "src", "main.ts");
+            string envFile = Path.Combine(backend, "src", ".env");
             string proxy = Path.Combine(frontend, "proxy.conf.native.json");
 
-            if (!File.Exists(cfg))
+            if (!File.Exists(mainTs))
             {
-                _termBack.Append("Falta backend/config.cfg\r\n", Color.FromArgb(255, 120, 120));
+                _termBack.Append("No hay backend Nest (falta backend/src/main.ts).\r\n", LogError);
+                _termBack.Append("Usa Native · Legacy (Express) o restaura la rama Nest.\r\n", TextMuted);
                 SetRunning(false);
                 return;
             }
+            if (!File.Exists(cfg))
+            {
+                _termBack.Append("Falta backend/config.cfg\r\n", LogError);
+                SetRunning(false);
+                return;
+            }
+            if (!File.Exists(envFile))
+                _termBack.Append("AVISO: falta backend/src/.env (JWT/SECRET). El login puede fallar.\r\n", LogWarn);
 
             Dictionary<string, string> beEnv = new Dictionary<string, string>();
             beEnv["AIW_CONFIG_CFG"] = cfg;
@@ -1462,6 +563,63 @@ namespace AppInWhats
             beEnv["NODE_OPTIONS"] = "--max-old-space-size=768";
             beEnv["FORCE_COLOR"] = "0";
 
+            string npm = FindNpm();
+            if (npm == null)
+            {
+                _termBack.Append("No se encontró npm. Instala Node.js LTS.\r\n", LogError);
+                SetRunning(false);
+                return;
+            }
+
+            _termBack.Append("Backend NestJS (nest start --watch)\r\n", Accent);
+            StartTracked(
+                "Backend",
+                npm,
+                "run start:dev",
+                backend,
+                beEnv,
+                _termBack);
+
+            StartNativeFrontend(frontend, proxy);
+            _termBack.Append("→ http://127.0.0.1:3001\r\n", Accent);
+            _termFront.Append("→ http://localhost:50080\r\n", Accent);
+        }
+
+        void StartNativeLegacy()
+        {
+            if (!EnsureCanStart() || !EnsureNpx()) return;
+            FreeDevPorts();
+            BeginMode("Native · Legacy", true, false, false, false, "native-legacy");
+
+            string backend = Path.Combine(_root, "backend");
+            string frontend = Path.Combine(_root, "frontend");
+            string cfg = Path.Combine(backend, "config.cfg");
+            string indexTs = Path.Combine(backend, "scr", "index.ts");
+            string envFile = Path.Combine(backend, "scr", ".env");
+            string proxy = Path.Combine(frontend, "proxy.conf.native.json");
+
+            if (!File.Exists(indexTs))
+            {
+                _termBack.Append("No hay backend Express legacy (falta backend/scr/index.ts).\r\n", LogError);
+                SetRunning(false);
+                return;
+            }
+            if (!File.Exists(cfg))
+            {
+                _termBack.Append("Falta backend/config.cfg\r\n", LogError);
+                SetRunning(false);
+                return;
+            }
+            if (!File.Exists(envFile))
+                _termBack.Append("AVISO: falta backend/scr/.env (JWT/SECRET). El login puede fallar.\r\n", LogWarn);
+
+            Dictionary<string, string> beEnv = new Dictionary<string, string>();
+            beEnv["AIW_CONFIG_CFG"] = cfg;
+            beEnv["PORT"] = "3001";
+            beEnv["NODE_OPTIONS"] = "--max-old-space-size=768";
+            beEnv["FORCE_COLOR"] = "0";
+
+            _termBack.Append("Backend Express legacy (nodemon · scr/)\r\n", Accent);
             StartTracked(
                 "Backend",
                 FindNpx(),
@@ -1470,6 +628,13 @@ namespace AppInWhats
                 beEnv,
                 _termBack);
 
+            StartNativeFrontend(frontend, proxy);
+            _termBack.Append("→ http://127.0.0.1:3001\r\n", Accent);
+            _termFront.Append("→ http://localhost:50080\r\n", Accent);
+        }
+
+        void StartNativeFrontend(string frontend, string proxy)
+        {
             Dictionary<string, string> feEnv = new Dictionary<string, string>();
             feEnv["NODE_OPTIONS"] = "--max-old-space-size=4096";
             feEnv["NG_CLI_ANALYTICS"] = "false";
@@ -1482,9 +647,6 @@ namespace AppInWhats
                 frontend,
                 feEnv,
                 _termFront);
-
-            _termBack.Append("→ http://127.0.0.1:3001\r\n", Accent);
-            _termFront.Append("→ http://localhost:50080\r\n", Accent);
         }
 
         void StartNativeRemote()
@@ -1496,7 +658,7 @@ namespace AppInWhats
             string frontend = Path.Combine(_root, "frontend");
             string proxy = Path.Combine(frontend, "proxy.conf.native.remote.json");
 
-            _termFront.Append("API remota: https://desarrollo.appinwhats.com\r\n", Color.FromArgb(56, 189, 248));
+            _termFront.Append("API remota: https://desarrollo.appinwhats.com\r\n", LogInfo);
             _termFront.Append("(sin backend local)\r\n\r\n", TextMuted);
 
             Dictionary<string, string> feEnv = new Dictionary<string, string>();
@@ -1621,21 +783,41 @@ namespace AppInWhats
                     return u.Substring(8);
                 return u;
             }
-            catch { return "217.160.205.6:1231"; }
+            catch { return "sin configurar"; }
+        }
+
+        void OpenServerSettings()
+        {
+            if (ShowServerConfigDialog(false))
+                RefreshServerSectionUi();
+        }
+
+        string BuildServerSubtitle()
+        {
+            ServerConfigData cfg = ReadServerConfigData();
+            if (cfg != null && cfg.IsConfigured())
+                return "Remoto · " + cfg.Host + ":" + cfg.FrontendPort;
+            return "Configura IP, usuario, password y puerto · primera vez te lo pide";
+        }
+
+        void RefreshServerSectionUi()
+        {
+            for (int i = 0; i < _homeSections.Count; i++)
+            {
+                HomeSection s = _homeSections[i];
+                if (s == null || !string.Equals(s.Id, "Servidor", StringComparison.OrdinalIgnoreCase)) continue;
+                if (s.Card != null)
+                    s.Card.Subtitle = BuildServerSubtitle();
+                break;
+            }
+            LoadServerAppUrlFromConfig();
+            RefreshSettingsPage();
         }
 
         void StartServerMode()
         {
             if (!EnsureCanStart()) return;
-
-            string cfgPath = Path.Combine(_root, "launcher", "server.config.json");
-            if (!File.Exists(cfgPath))
-            {
-                MessageBox.Show(
-                    "Falta launcher/server.config.json\n\nCopia server.config.example.json y rellena host, usuario y password.",
-                    "AppInWhats DevBuild", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            if (!EnsureServerConfig()) return;
 
             LoadServerAppUrlFromConfig();
             bool alreadyInSession = _sessionPanel != null && _sessionPanel.Visible && IsServerMode();
@@ -1660,53 +842,148 @@ namespace AppInWhats
             }
         }
 
+        bool EnsureServerConfig()
+        {
+            ServerConfigData cfg = ReadServerConfigData();
+            if (cfg != null && cfg.IsConfigured()) return true;
+            MessageBox.Show(
+                "Antes de usar el servidor remoto hay que configurarlo:\nIP, usuario, password y puerto web de salida.",
+                "AppInWhats DevBuild",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            if (!ShowServerConfigDialog(true)) return false;
+            RefreshServerSectionUi();
+            cfg = ReadServerConfigData();
+            return cfg != null && cfg.IsConfigured();
+        }
+
+        string ServerConfigPath()
+        {
+            return Path.Combine(_root, "launcher", "server.config.json");
+        }
+
+        ServerConfigData ReadServerConfigData()
+        {
+            try
+            {
+                string path = ServerConfigPath();
+                ServerConfigData d = new ServerConfigData();
+                if (!File.Exists(path)) return d;
+                string json = File.ReadAllText(path, Encoding.UTF8);
+                string v;
+                v = ExtractJsonValue(json, "host"); if (!string.IsNullOrEmpty(v)) d.Host = v;
+                v = ExtractJsonValue(json, "port"); if (!string.IsNullOrEmpty(v)) d.SshPort = v;
+                v = ExtractJsonValue(json, "user"); if (!string.IsNullOrEmpty(v)) d.User = v;
+                v = ExtractJsonValue(json, "password"); if (!string.IsNullOrEmpty(v)) d.Password = v;
+                v = ExtractJsonValue(json, "frontendPort"); if (!string.IsNullOrEmpty(v)) d.FrontendPort = v;
+                v = ExtractJsonValue(json, "backendPort"); if (!string.IsNullOrEmpty(v)) d.BackendPort = v;
+                v = ExtractJsonValue(json, "remoteRoot"); if (!string.IsNullOrEmpty(v)) d.RemoteRoot = v;
+                return d;
+            }
+            catch
+            {
+                return new ServerConfigData();
+            }
+        }
+
+        void WriteServerConfigData(ServerConfigData d)
+        {
+            string path = ServerConfigPath();
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+            int sshPort;
+            if (!int.TryParse(d.SshPort, out sshPort)) sshPort = 22;
+            int fePort;
+            if (!int.TryParse(d.FrontendPort, out fePort))
+                throw new InvalidOperationException("Puerto web inválido");
+            int bePort;
+            if (!int.TryParse(d.BackendPort, out bePort)) bePort = 3001;
+            if (string.IsNullOrEmpty(d.RemoteRoot)) d.RemoteRoot = "/root/appinwhats";
+            string json =
+                "{\r\n" +
+                "  \"host\": \"" + EscapeJson(d.Host) + "\",\r\n" +
+                "  \"port\": " + sshPort + ",\r\n" +
+                "  \"user\": \"" + EscapeJson(d.User) + "\",\r\n" +
+                "  \"password\": \"" + EscapeJson(d.Password) + "\",\r\n" +
+                "  \"remoteRoot\": \"" + EscapeJson(d.RemoteRoot) + "\",\r\n" +
+                "  \"frontendPort\": " + fePort + ",\r\n" +
+                "  \"backendPort\": " + bePort + "\r\n" +
+                "}\r\n";
+            File.WriteAllText(path, json, new UTF8Encoding(false));
+        }
+
+        static string EscapeJson(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        }
+
+
         void LoadServerAppUrlFromConfig()
         {
             try
             {
-                string cfgPath = Path.Combine(_root, "launcher", "server.config.json");
-                if (!File.Exists(cfgPath)) return;
-                string json = File.ReadAllText(cfgPath, Encoding.UTF8);
-                string host = ExtractJsonString(json, "host");
-                string fePort = ExtractJsonNumberOrString(json, "frontendPort");
-                if (string.IsNullOrEmpty(host)) host = "217.160.205.6";
-                if (string.IsNullOrEmpty(fePort)) fePort = "1231";
-                _serverAppUrl = "http://" + host + ":" + fePort;
+                ServerConfigData d = ReadServerConfigData();
+                if (d == null || !d.IsConfigured())
+                {
+                    _serverAppUrl = "";
+                    return;
+                }
+                _serverAppUrl = "http://" + d.Host + ":" + d.FrontendPort;
             }
             catch
             {
-                _serverAppUrl = "http://217.160.205.6:1231";
+                _serverAppUrl = "";
             }
         }
 
-        static string ExtractJsonString(string json, string key)
+        static bool IsDigits(string s)
         {
-            string needle = "\"" + key + "\"";
-            int i = json.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
-            if (i < 0) return "";
-            int colon = json.IndexOf(':', i + needle.Length);
-            if (colon < 0) return "";
-            int q1 = json.IndexOf('"', colon + 1);
-            if (q1 < 0) return "";
-            int q2 = json.IndexOf('"', q1 + 1);
-            if (q2 < 0) return "";
-            return json.Substring(q1 + 1, q2 - q1 - 1);
+            if (string.IsNullOrEmpty(s)) return false;
+            for (int i = 0; i < s.Length; i++)
+                if (!char.IsDigit(s[i])) return false;
+            return true;
         }
 
-        static string ExtractJsonNumberOrString(string json, string key)
+        // Lee "key": "texto" o "key": 1231 (sin confundir con la siguiente clave)
+        static string ExtractJsonValue(string json, string key)
         {
-            string asStr = ExtractJsonString(json, key);
-            if (!string.IsNullOrEmpty(asStr)) return asStr;
+            if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(key)) return "";
             string needle = "\"" + key + "\"";
-            int i = json.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
-            if (i < 0) return "";
-            int colon = json.IndexOf(':', i + needle.Length);
+            int i = 0;
+            int colon = -1;
+            while (true)
+            {
+                i = json.IndexOf(needle, i, StringComparison.OrdinalIgnoreCase);
+                if (i < 0) return "";
+                int afterKey = i + needle.Length;
+                int p = afterKey;
+                while (p < json.Length && char.IsWhiteSpace(json[p])) p++;
+                if (p < json.Length && json[p] == ':')
+                {
+                    colon = p;
+                    break;
+                }
+                i = afterKey;
+            }
             if (colon < 0) return "";
+
             int j = colon + 1;
             while (j < json.Length && char.IsWhiteSpace(json[j])) j++;
+            if (j >= json.Length) return "";
+
+            if (json[j] == '"')
+            {
+                int q2 = json.IndexOf('"', j + 1);
+                if (q2 < 0) return "";
+                return json.Substring(j + 1, q2 - j - 1);
+            }
+
             int k = j;
-            while (k < json.Length && (char.IsDigit(json[k]) || json[k] == '.')) k++;
-            if (k <= j) return "";
+            if (json[k] == '-') k++;
+            while (k < json.Length && char.IsDigit(json[k])) k++;
+            if (k <= j || (json[j] == '-' && k == j + 1)) return "";
             return json.Substring(j, k - j);
         }
 
@@ -1836,6 +1113,18 @@ namespace AppInWhats
             BeginMode("Compilar frontend", false, false, false, false, "compile-front");
             _termFront.SetTitle("Compilar frontend (production)");
             _openDistAfterBuild = true;
+            _uploadPleskAfterBuild = false;
+            StartFrontendProductionBuild();
+        }
+
+        void StartCompileAndUploadPlesk()
+        {
+            if (!EnsureCanStart() || !EnsureNpx()) return;
+            if (!EnsurePleskConfig()) return;
+            BeginMode("Compilar → Plesk", false, false, false, false, "compile-plesk");
+            _termFront.SetTitle("Compilar y subir a Plesk");
+            _openDistAfterBuild = false;
+            _uploadPleskAfterBuild = true;
             StartFrontendProductionBuild();
         }
 
@@ -1872,7 +1161,9 @@ namespace AppInWhats
             _termFront.Append("\r\n", TermFg);
             _termFront.Append("═══ Compilar frontend (production) ═══\r\n", Accent);
             _termFront.Append("ng build --configuration=production\r\n", TextMuted);
-            if (_openDistAfterBuild)
+            if (_uploadPleskAfterBuild)
+                _termFront.Append("Al terminar se subirá dist a Plesk por SFTP\r\n\r\n", TextMuted);
+            else if (_openDistAfterBuild)
                 _termFront.Append("Al terminar se abrirá la carpeta dist\r\n\r\n", TextMuted);
             else
                 _termFront.Append("(el serve en marcha no se detiene)\r\n\r\n", TextMuted);
@@ -1887,7 +1178,9 @@ namespace AppInWhats
             env["NG_CLI_ANALYTICS"] = "false";
             env["FORCE_COLOR"] = "0";
             bool openDist = _openDistAfterBuild;
+            bool uploadPlesk = _uploadPleskAfterBuild;
             _openDistAfterBuild = false;
+            _uploadPleskAfterBuild = false;
 
             try
             {
@@ -1930,7 +1223,7 @@ namespace AppInWhats
                 };
                 proc.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e)
                 {
-                    if (e.Data != null) _termFront.Append(e.Data + "\r\n", Color.FromArgb(180, 100, 20));
+                    if (e.Data != null) _termFront.Append(e.Data + "\r\n", LogStderr);
                 };
                 proc.Exited += delegate
                 {
@@ -1941,18 +1234,28 @@ namespace AppInWhats
                         if (code == 0)
                         {
                             _termFront.Append("\r\n■ Build production OK\r\n", Accent);
-                            if (openDist)
+                            if (uploadPlesk)
+                                StartPleskFrontUpload();
+                            else if (openDist)
                                 OpenFrontendDistFolder();
                         }
                         else
                             _termFront.Append("\r\n■ Build production falló · código " + code + "\r\n", Danger);
 
                         if (_btnBuild != null) _btnBuild.Enabled = true;
-                        if (string.Equals(_modeId, "compile-front", StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(_modeId, "compile-front", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(_modeId, "compile-plesk", StringComparison.OrdinalIgnoreCase))
                         {
-                            SetRunning(false);
-                            _status.Text = code == 0 ? "Build OK · dist abierta" : "Build production falló";
-                            _status.ForeColor = code == 0 ? Accent : Danger;
+                            if (uploadPlesk && code == 0)
+                            {
+                                // El estado lo actualiza el upload
+                            }
+                            else
+                            {
+                                SetRunning(false);
+                                _status.Text = code == 0 ? "Build OK · dist abierta" : "Build production falló";
+                                _status.ForeColor = code == 0 ? Accent : Danger;
+                            }
                         }
                         else if (_running)
                         {
@@ -1978,7 +1281,7 @@ namespace AppInWhats
             }
             catch (Exception ex)
             {
-                _termFront.Append("ERROR build: " + ex.Message + "\r\n", Color.FromArgb(255, 120, 120));
+                _termFront.Append("ERROR build: " + ex.Message + "\r\n", LogError);
                 if (_btnBuild != null) _btnBuild.Enabled = true;
             }
         }
@@ -2005,19 +1308,200 @@ namespace AppInWhats
                 _termFront.Append("No se encontró la carpeta dist tras el build.\r\n", Danger);
                 return;
             }
-
-            _termFront.Append("Abriendo: " + folder + "\r\n", Accent);
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = "explorer.exe";
-                psi.Arguments = "\"" + folder + "\"";
-                psi.UseShellExecute = true;
-                Process.Start(psi);
+                Process.Start(new ProcessStartInfo()
+                {
+                    FileName = folder,
+                    UseShellExecute = true,
+                });
             }
             catch (Exception ex)
             {
                 _termFront.Append("No se pudo abrir dist: " + ex.Message + "\r\n", Danger);
+            }
+        }
+
+        string PleskConfigPath()
+        {
+            return Path.Combine(_root, "launcher", "plesk.config.json");
+        }
+
+        sealed class PleskConfigData
+        {
+            public string Host = "";
+            public string User = "";
+            public string Password = "";
+            public string Port = "22";
+            public string RemotePath = "";
+
+            public bool IsPlaceholderPassword()
+            {
+                if (string.IsNullOrEmpty(Password)) return true;
+                string p = Password.Trim();
+                return string.Equals(p, "TU_PASSWORD_AQUI", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(p, "changeme", StringComparison.OrdinalIgnoreCase);
+            }
+
+            public bool IsConfigured()
+            {
+                return !string.IsNullOrEmpty(Host)
+                    && !string.IsNullOrEmpty(User)
+                    && !IsPlaceholderPassword()
+                    && !string.IsNullOrEmpty(RemotePath)
+                    && RemotePath.IndexOf("TU_DOMINIO", StringComparison.OrdinalIgnoreCase) < 0
+                    && (string.IsNullOrEmpty(Port) || IsDigits(Port));
+            }
+        }
+
+        PleskConfigData ReadPleskConfigData()
+        {
+            try
+            {
+                string path = PleskConfigPath();
+                PleskConfigData d = new PleskConfigData();
+                if (!File.Exists(path)) return d;
+                string json = File.ReadAllText(path, Encoding.UTF8);
+                d.Host = ExtractJsonValue(json, "host");
+                d.User = ExtractJsonValue(json, "user");
+                d.Password = ExtractJsonValue(json, "password");
+                d.Port = ExtractJsonValue(json, "port");
+                d.RemotePath = ExtractJsonValue(json, "remotePath");
+                if (string.IsNullOrEmpty(d.Port)) d.Port = "22";
+                return d;
+            }
+            catch
+            {
+                return new PleskConfigData();
+            }
+        }
+
+        void WritePleskConfigData(PleskConfigData d)
+        {
+            string path = PleskConfigPath();
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("{");
+            sb.AppendLine("  \"host\": \"" + EscapeJson(d.Host) + "\",");
+            sb.AppendLine("  \"port\": " + (IsDigits(d.Port) ? d.Port : "22") + ",");
+            sb.AppendLine("  \"user\": \"" + EscapeJson(d.User) + "\",");
+            sb.AppendLine("  \"password\": \"" + EscapeJson(d.Password) + "\",");
+            sb.AppendLine("  \"remotePath\": \"" + EscapeJson(d.RemotePath) + "\"");
+            sb.AppendLine("}");
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        bool EnsurePleskConfig()
+        {
+            PleskConfigData cfg = ReadPleskConfigData();
+            if (cfg != null && cfg.IsConfigured()) return true;
+            MessageBox.Show(
+                "Configura la subida a Plesk.\n\n"
+                + "Necesitas el document root del dominio, por ejemplo:\n"
+                + "/var/www/vhosts/tudominio.com/httpdocs\n\n"
+                + "(El File Manager web de Plesk no sirve para automatizar; se usa SFTP/SSH.)",
+                "AppInWhats DevBuild",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            if (!ShowPleskConfigDialog(true)) return false;
+            cfg = ReadPleskConfigData();
+            return cfg != null && cfg.IsConfigured();
+        }
+
+
+        void StartPleskFrontUpload()
+        {
+            string script = Path.Combine(_root, "launcher", "server_remote.py");
+            if (!File.Exists(script))
+            {
+                MessageBox.Show("No se encuentra launcher/server_remote.py", "AppInWhats DevBuild",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetRunning(false);
+                return;
+            }
+            string py = FindPython();
+            if (string.IsNullOrEmpty(py))
+            {
+                MessageBox.Show("No se encontró Python (necesario para SFTP a Plesk).",
+                    "AppInWhats DevBuild", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetRunning(false);
+                return;
+            }
+
+            _termFront.Append("\r\n═══ Subir dist a Plesk (SFTP) ═══\r\n", Accent);
+            _status.Text = "Subiendo front a Plesk…";
+            _status.ForeColor = Accent;
+
+            Dictionary<string, string> env = new Dictionary<string, string>();
+            env["PYTHONIOENCODING"] = "utf-8";
+            env["PYTHONUNBUFFERED"] = "1";
+            string args = (py == "py" ? "-3 " : "") + "\"" + script + "\" upload-plesk-front";
+
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = py == "py" ? "py" : py;
+                psi.Arguments = args.StartsWith("-3 ") ? args : ("\"" + script + "\" upload-plesk-front");
+                if (py != "py")
+                    psi.Arguments = "\"" + script + "\" upload-plesk-front";
+                else
+                    psi.Arguments = "-3 \"" + script + "\" upload-plesk-front";
+
+                psi.WorkingDirectory = _root;
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                psi.StandardOutputEncoding = Encoding.UTF8;
+                psi.StandardErrorEncoding = Encoding.UTF8;
+                foreach (KeyValuePair<string, string> kv in env)
+                    psi.EnvironmentVariables[kv.Key] = kv.Value;
+
+                Process proc = new Process();
+                proc.StartInfo = psi;
+                proc.EnableRaisingEvents = true;
+                proc.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
+                {
+                    if (e.Data != null) _termFront.Append(e.Data + "\r\n", TermFg);
+                };
+                proc.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e)
+                {
+                    if (e.Data != null) _termFront.Append(e.Data + "\r\n", LogStderr);
+                };
+                proc.Exited += delegate
+                {
+                    if (IsDisposed || _closing) return;
+                    BeginInvoke(new Action(delegate
+                    {
+                        int code = SafeExitCode(proc);
+                        SetRunning(false);
+                        if (code == 0)
+                        {
+                            _termFront.Append("\r\n■ Subida a Plesk OK\r\n", Accent);
+                            _status.Text = "Front subido a Plesk";
+                            _status.ForeColor = Accent;
+                        }
+                        else
+                        {
+                            _termFront.Append("\r\n■ Subida a Plesk falló · código " + code + "\r\n", Danger);
+                            _status.Text = "Subida a Plesk falló";
+                            _status.ForeColor = Danger;
+                        }
+                    }));
+                };
+                proc.Start();
+                AssignProcessToKillJob(proc);
+                proc.BeginOutputReadLine();
+                proc.BeginErrorReadLine();
+            }
+            catch (Exception ex)
+            {
+                _termFront.Append("ERROR subida Plesk: " + ex.Message + "\r\n", Danger);
+                SetRunning(false);
+                _status.Text = "Subida a Plesk falló";
+                _status.ForeColor = Danger;
             }
         }
 
@@ -2029,6 +1513,28 @@ namespace AppInWhats
             MessageBox.Show("No se encontró npx/npm. Instala Node.js LTS.", "AppInWhats",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
+        }
+
+        static string FindNpm()
+        {
+            string[] candidates = new string[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "npm.cmd"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "nodejs", "npm.cmd"),
+            };
+            for (int i = 0; i < candidates.Length; i++)
+                if (File.Exists(candidates[i])) return candidates[i];
+
+            string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            string[] parts = pathEnv.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string p = Path.Combine(parts[i].Trim(), "npm.cmd");
+                if (File.Exists(p)) return p;
+                p = Path.Combine(parts[i].Trim(), "npm.exe");
+                if (File.Exists(p)) return p;
+            }
+            return null;
         }
 
         static string FindNpx()
@@ -2101,7 +1607,7 @@ namespace AppInWhats
                 };
                 proc.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e)
                 {
-                    if (e.Data != null) term.Append(e.Data + "\r\n", Color.FromArgb(180, 100, 20));
+                    if (e.Data != null) term.Append(e.Data + "\r\n", LogStderr);
                 };
                 proc.Exited += delegate
                 {
@@ -2123,7 +1629,7 @@ namespace AppInWhats
             }
             catch (Exception ex)
             {
-                term.Append("ERROR: " + ex.Message + "\r\n", Color.FromArgb(255, 120, 120));
+                term.Append("ERROR: " + ex.Message + "\r\n", LogError);
                 CheckAllExited();
             }
         }
@@ -2237,7 +1743,9 @@ namespace AppInWhats
 
         void HideResumeBanner()
         {
-            if (_resumeBanner != null) _resumeBanner.Visible = false;
+            if (_resumeBanner == null || !_resumeBanner.Visible) return;
+            _resumeBanner.Visible = false;
+            LayoutHomeTiles();
         }
 
         void CheckPreviousSession()
@@ -2253,17 +1761,9 @@ namespace AppInWhats
             }
 
             string title = (st != null && !string.IsNullOrEmpty(st.Title)) ? st.Title : "Native (puertos 3001/50080 ocupados)";
-            _resumeLabel.Text = "Sesión aún activa: " + title + "  ·  Puedes reabrir el panel o detenerla.";
-            _resumeBanner.Visible = true;
-            _resumeBanner.BringToFront();
+            ShowResumeBanner("«" + title + "» sigue abierta" + (portsBusy ? " · puertos 3001/50080 ocupados" : ""));
             _status.Text = "Aviso: hay procesos de una sesión anterior";
-            _status.ForeColor = Color.FromArgb(180, 100, 20);
-
-            MessageBox.Show(
-                "Se detectó una sesión todavía en marcha:\n\n«" + title + "»\n\n" +
-                (portsBusy ? "(Puertos 3001 y/o 50080 ocupados)\n\n" : "") +
-                "Usa «Abrir sesión» para volver a ese modo, o «Detener» para liberar los puertos.",
-                "AppInWhats", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            _status.ForeColor = Theme.Caution;
         }
 
         void ResumePreviousSession()
@@ -2540,6 +2040,8 @@ namespace AppInWhats
                                 string cmd = SafeProcessCommandHint(_procs[i]);
                                 if (cmd.IndexOf("nodemon", StringComparison.OrdinalIgnoreCase) >= 0
                                     || cmd.IndexOf("ts-node", StringComparison.OrdinalIgnoreCase) >= 0
+                                    || cmd.IndexOf("nest start", StringComparison.OrdinalIgnoreCase) >= 0
+                                    || cmd.IndexOf("start:dev", StringComparison.OrdinalIgnoreCase) >= 0
                                     || cmd.IndexOf("\\backend", StringComparison.OrdinalIgnoreCase) >= 0)
                                     target = backIds;
                                 else if (cmd.IndexOf("ng serve", StringComparison.OrdinalIgnoreCase) >= 0
@@ -2582,10 +2084,10 @@ namespace AppInWhats
 
                 _prevCpuSample = now;
 
-                _statsBack.SetStatsText(FormatStats("Backend", back));
-                _statsFront.SetStatsText(FormatStats("Frontend", front));
-                _statsOther.SetStatsText(FormatStats(_modeDocker ? "Docker" : "Otros", other));
-                _statsTotal.SetStatsText(FormatStats("Total", total));
+                ApplyStats(_statsBack, "Backend", back);
+                ApplyStats(_statsFront, "Frontend", front);
+                ApplyStats(_statsOther, _modeDocker ? "Docker" : "Otros", other);
+                ApplyStats(_statsTotal, "Total", total);
 
                 if (_status != null && _running)
                 {
@@ -2669,14 +2171,6 @@ namespace AppInWhats
             agg.CpuPercent = Math.Max(0, Math.Min(100.0 * cores, (cpuMs / elapsedMs) * 100.0));
         }
 
-        static string FormatStats(string role, ProcAgg agg)
-        {
-            if (agg.Count <= 0)
-                return role + "  ·  inactivo";
-            return string.Format("{0}  ·  {1:0.0}% CPU  ·  {2}  ·  {3} proc",
-                role, agg.CpuPercent, FormatBytes(agg.MemoryBytes), agg.Count);
-        }
-
         static string FormatBytes(long bytes)
         {
             if (bytes < 1024) return bytes + " B";
@@ -2744,197 +2238,6 @@ namespace AppInWhats
             }
         }
 
-        // --- UI helpers (chrome / tiles) ---
-
-        Label MakeDragLabel(string text, Font font, Color color, Point location)
-        {
-            Label lbl = new Label();
-            lbl.Text = text;
-            lbl.AutoSize = true;
-            lbl.Font = font;
-            lbl.ForeColor = color;
-            lbl.Location = location;
-            lbl.BackColor = Color.Transparent;
-            lbl.MouseDown += BeginWindowDrag;
-            return lbl;
-        }
-
-        void MinimizeWindow() { WindowState = FormWindowState.Minimized; }
-
-        void BeginWindowDrag(object sender, MouseEventArgs e)
-        {
-            if (e.Button != MouseButtons.Left || _maximized) return;
-            if (e.Clicks > 1) return; // deja pasar el doble clic a maximizar/restaurar
-            ReleaseCapture();
-            SendMessage(Handle, 0xA1, (IntPtr)0x2, IntPtr.Zero);
-        }
-
-        void TitleBarDoubleClick(object sender, EventArgs e)
-        {
-            ToggleMaximize();
-        }
-
-        void ToggleMaximize()
-        {
-            if (!_maximized)
-            {
-                _restoreBounds = Bounds;
-                Bounds = Screen.FromControl(this).WorkingArea;
-                _maximized = true;
-            }
-            else
-            {
-                Bounds = _restoreBounds;
-                _maximized = false;
-            }
-            ApplyWindowFrame();
-            if (_capMax != null)
-            {
-                _capMax.IsRestored = _maximized;
-                _capMax.Invalidate();
-            }
-        }
-
-        Control CreateTile(TileInfo info, int w, int h)
-        {
-            TileFace face = new TileFace(info);
-            face.Size = new Size(w, h);
-            face.Cursor = Cursors.Hand;
-            face.Click += delegate { info.Action(); };
-            return face;
-        }
-
-        sealed class TileFace : Control
-        {
-            readonly TileInfo _info;
-            bool _hover;
-
-            public TileFace(TileInfo info)
-            {
-                _info = info;
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
-                BackColor = Color.White;
-                MouseEnter += delegate { _hover = true; Invalidate(); };
-                MouseLeave += delegate { _hover = false; Invalidate(); };
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Color.White);
-
-                Rectangle rect = new Rectangle(1, 1, Width - 3, Height - 3);
-                Color face = _hover ? Color.FromArgb(248, 250, 252) : Color.FromArgb(252, 253, 255);
-                Color border = _hover ? Color.FromArgb(200, 210, 220) : Color.FromArgb(228, 232, 238);
-                using (GraphicsPath path = RoundRect(rect, 18))
-                using (SolidBrush brush = new SolidBrush(face))
-                using (Pen pen = new Pen(border, 1.25f))
-                {
-                    g.FillPath(brush, path);
-                    g.DrawPath(pen, path);
-                }
-
-                int ix = (rect.Width - 56) / 2;
-                int iy = 18;
-                using (SolidBrush ring = new SolidBrush(Color.FromArgb(28, _info.Accent)))
-                    g.FillEllipse(ring, ix - 3, iy - 3, 62, 62);
-                using (SolidBrush iconBg = new SolidBrush(_info.Accent))
-                    g.FillEllipse(iconBg, ix, iy, 56, 56);
-                using (SolidBrush brush = new SolidBrush(Color.White))
-                using (Font font = new Font("Segoe UI Semibold", 18f, FontStyle.Bold))
-                {
-                    SizeF sz = g.MeasureString(_info.Glyph, font);
-                    g.DrawString(_info.Glyph, font, brush, ix + (56 - sz.Width) / 2f, iy + (56 - sz.Height) / 2f);
-                }
-
-                using (SolidBrush tb = new SolidBrush(TextMain))
-                using (Font tf = new Font("Segoe UI Semibold", 11f, FontStyle.Bold))
-                {
-                    SizeF sz = g.MeasureString(_info.Title, tf);
-                    g.DrawString(_info.Title, tf, tb, (rect.Width - sz.Width) / 2f, 92);
-                }
-                using (SolidBrush bb = new SolidBrush(_info.Accent))
-                using (Font bf = new Font("Segoe UI", 8.5f, FontStyle.Bold))
-                {
-                    SizeF sz = g.MeasureString(_info.Badge, bf);
-                    g.DrawString(_info.Badge, bf, bb, (rect.Width - sz.Width) / 2f, 114);
-                }
-                using (SolidBrush db = new SolidBrush(TextMuted))
-                using (Font df = new Font("Segoe UI", 7.5f))
-                using (StringFormat sf = new StringFormat())
-                {
-                    sf.Alignment = StringAlignment.Center;
-                    g.DrawString(_info.Desc, df, db, new RectangleF(10, 134, rect.Width - 20, 24), sf);
-                }
-            }
-        }
-
-        sealed class StatsChip : Control
-        {
-            readonly Color _accent;
-            string _statsText;
-
-            public StatsChip(string role, Color accent)
-            {
-                _accent = accent;
-                _statsText = role + "  ·  —";
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                BackColor = Color.White;
-                Font = new Font("Segoe UI Semibold", 8.25f, FontStyle.Bold);
-            }
-
-            public void SetStatsText(string text)
-            {
-                _statsText = text ?? "";
-                Invalidate();
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Parent != null ? Parent.BackColor : Color.FromArgb(250, 251, 253));
-
-                Rectangle rr = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (GraphicsPath path = RoundRect(rr, 10))
-                using (SolidBrush fill = new SolidBrush(Color.White))
-                using (Pen pen = new Pen(Border, 1))
-                {
-                    g.FillPath(fill, path);
-                    g.DrawPath(pen, path);
-                }
-
-                TextRenderer.DrawText(
-                    g,
-                    _statsText,
-                    Font,
-                    new Rectangle(12, 0, Width - 18, Height),
-                    TextMain,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-            }
-        }
-
-        sealed class DoubleBufferedPanel : Panel
-        {
-            public DoubleBufferedPanel()
-            {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                UpdateStyles();
-            }
-        }
-
-        static GraphicsPath RoundRect(Rectangle r, int radius)
-        {
-            int d = radius * 2;
-            GraphicsPath path = new GraphicsPath();
-            path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
-        }
 
         [DllImport("user32.dll")]
         static extern bool ReleaseCapture();
@@ -3026,6 +2329,10 @@ namespace AppInWhats
             if (!string.IsNullOrEmpty(title) && title.IndexOf("Instalar", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "install";
             if (remote) return "native-remote";
+            if (!string.IsNullOrEmpty(title) && title.IndexOf("Legacy", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "native-legacy";
+            if (!string.IsNullOrEmpty(title) && title.IndexOf("Nest", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "native-local";
             if (dual) return "native-local";
             return "native-local";
         }
@@ -3055,328 +2362,36 @@ namespace AppInWhats
             }
         }
 
-        sealed class HomeSection
+        sealed class ServerConfigData
         {
-            public string Id;
-            public SectionCard Card;
-            public Color Accent;
-            public Control DragHandle;
-            public readonly List<Control> Tiles = new List<Control>();
-        }
+            public string Host = "";
+            public string SshPort = "";
+            public string User = "";
+            public string Password = "";
+            public string FrontendPort = "";
+            public string BackendPort = "";
+            public string RemoteRoot = "";
 
-        sealed class SectionCard : Panel
-        {
-            readonly Color _accent;
-
-            public SectionCard(Color accent)
+            public bool IsPlaceholderPassword()
             {
-                _accent = accent;
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                UpdateStyles();
+                if (string.IsNullOrEmpty(Password)) return true;
+                string p = Password.Trim();
+                return string.Equals(p, "TU_PASSWORD_AQUI", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(p, "changeme", StringComparison.OrdinalIgnoreCase);
             }
 
-            protected override void OnPaint(PaintEventArgs e)
+            public bool IsConfigured()
             {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Parent != null ? Parent.BackColor : Bg);
-
-                Rectangle rr = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (GraphicsPath path = RoundRect(rr, 16))
-                using (SolidBrush fill = new SolidBrush(Color.White))
-                using (Pen pen = new Pen(Color.FromArgb(228, 232, 238), 1))
-                {
-                    g.FillPath(fill, path);
-                    g.DrawPath(pen, path);
-                }
-
-                // Punto del título
-                using (SolidBrush b = new SolidBrush(_accent))
-                    g.FillEllipse(b, 20, 20, 18, 18);
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(230, Color.White)))
-                    g.FillEllipse(b, 25, 25, 8, 8);
+                return !string.IsNullOrEmpty(Host)
+                    && !string.IsNullOrEmpty(User)
+                    && !IsPlaceholderPassword()
+                    && IsDigits(FrontendPort)
+                    && (string.IsNullOrEmpty(SshPort) || IsDigits(SshPort));
             }
         }
 
-        sealed class ModernVScrollBar : Control
+        sealed partial class TerminalView
         {
-            int _minimum;
-            int _maximum = 100;
-            int _largeChange = 10;
-            int _value;
-            bool _dragging;
-            bool _hover;
-            int _dragOffset;
-
-            public event EventHandler Scroll;
-
-            public ModernVScrollBar()
-            {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                Width = 12;
-                BackColor = Bg;
-                Cursor = Cursors.Hand;
-            }
-
-            public int Minimum
-            {
-                get { return _minimum; }
-                set { _minimum = value; Invalidate(); }
-            }
-
-            public int Maximum
-            {
-                get { return _maximum; }
-                set { _maximum = Math.Max(_minimum, value); ClampValue(); Invalidate(); }
-            }
-
-            public int LargeChange
-            {
-                get { return _largeChange; }
-                set { _largeChange = Math.Max(1, value); Invalidate(); }
-            }
-
-            public int Value
-            {
-                get { return _value; }
-                set
-                {
-                    int v = value;
-                    int maxVal = Math.Max(_minimum, _maximum - Math.Max(0, _largeChange - 1));
-                    if (v < _minimum) v = _minimum;
-                    if (v > maxVal) v = maxVal;
-                    if (v == _value) return;
-                    _value = v;
-                    Invalidate();
-                    if (Scroll != null) Scroll(this, EventArgs.Empty);
-                }
-            }
-
-            void ClampValue()
-            {
-                int maxVal = Math.Max(_minimum, _maximum - Math.Max(0, _largeChange - 1));
-                if (_value > maxVal) _value = maxVal;
-                if (_value < _minimum) _value = _minimum;
-            }
-
-            Rectangle ThumbRect()
-            {
-                int track = Math.Max(1, Height - 8);
-                int range = Math.Max(1, _maximum - _minimum);
-                int thumbH = Math.Max(28, (int)((long)_largeChange * track / range));
-                if (thumbH > track) thumbH = track;
-                int maxVal = Math.Max(1, range - Math.Max(0, _largeChange - 1));
-                int travel = Math.Max(0, track - thumbH);
-                int y = 4 + (maxVal <= 0 ? 0 : (int)((long)_value * travel / maxVal));
-                return new Rectangle(2, y, Math.Max(6, Width - 4), thumbH);
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Parent != null ? Parent.BackColor : Bg);
-
-                Rectangle track = new Rectangle(3, 4, Math.Max(4, Width - 6), Math.Max(1, Height - 8));
-                using (GraphicsPath path = RoundRect(track, 4))
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(Enabled ? 228 : 238, 232, 238)))
-                    g.FillPath(b, path);
-
-                if (!Enabled) return;
-
-                Rectangle thumb = ThumbRect();
-                using (GraphicsPath path = RoundRect(thumb, 4))
-                using (SolidBrush b = new SolidBrush(_dragging
-                    ? Color.FromArgb(120, 130, 145)
-                    : (_hover ? Color.FromArgb(150, 160, 175) : Color.FromArgb(175, 182, 194))))
-                    g.FillPath(b, path);
-            }
-
-            protected override void OnMouseEnter(EventArgs e)
-            {
-                _hover = true;
-                Invalidate();
-                base.OnMouseEnter(e);
-            }
-
-            protected override void OnMouseLeave(EventArgs e)
-            {
-                _hover = false;
-                Invalidate();
-                base.OnMouseLeave(e);
-            }
-
-            protected override void OnMouseDown(MouseEventArgs e)
-            {
-                if (e.Button != MouseButtons.Left) return;
-                Rectangle thumb = ThumbRect();
-                if (thumb.Contains(e.Location))
-                {
-                    _dragging = true;
-                    _dragOffset = e.Y - thumb.Y;
-                    Invalidate();
-                }
-                else
-                {
-                    int page = Math.Max(1, _largeChange - 8);
-                    Value = e.Y < thumb.Y ? _value - page : _value + page;
-                }
-                base.OnMouseDown(e);
-            }
-
-            protected override void OnMouseMove(MouseEventArgs e)
-            {
-                if (_dragging)
-                {
-                    int track = Math.Max(1, Height - 8);
-                    int range = Math.Max(1, _maximum - _minimum);
-                    int thumbH = Math.Max(28, (int)((long)_largeChange * track / range));
-                    if (thumbH > track) thumbH = track;
-                    int travel = Math.Max(1, track - thumbH);
-                    int maxVal = Math.Max(1, range - Math.Max(0, _largeChange - 1));
-                    int y = e.Y - _dragOffset - 4;
-                    if (y < 0) y = 0;
-                    if (y > travel) y = travel;
-                    Value = _minimum + (int)((long)y * maxVal / travel);
-                }
-                base.OnMouseMove(e);
-            }
-
-            protected override void OnMouseUp(MouseEventArgs e)
-            {
-                _dragging = false;
-                Invalidate();
-                base.OnMouseUp(e);
-            }
-        }
-
-        sealed class TileInfo
-        {
-            public string Title;
-            public string Badge;
-            public string Desc;
-            public Color Accent;
-            public string Glyph;
-            public Action Action;
-
-            public TileInfo(string title, string badge, string desc, Color accent, string glyph, Action action)
-            {
-                Title = title;
-                Badge = badge;
-                Desc = desc;
-                Accent = accent;
-                Glyph = glyph;
-                Action = action;
-            }
-        }
-
-        sealed class TerminalView : Panel
-        {
-            readonly Label _title;
-            readonly RichTextBox _box;
-            readonly Color _accent;
-            readonly string _folderPath;
-            readonly Panel _head;
-            readonly RoundedButton _btnFolder;
-            readonly RoundedButton _btnBranch;
-            bool _gitReady;
-            string _currentBranch = "";
-            const int MaxChars = 200000;
-
-            public Func<bool> BeforeBranchSwitch;
-            public Action AfterBranchSwitchSuccess;
-
-            public TerminalView(string title, Color accent, string folderPath)
-            {
-                _accent = accent;
-                _folderPath = folderPath;
-                BackColor = TermBg;
-                Padding = new Padding(0);
-
-                _head = new DoubleBufferedPanel();
-                _head.Dock = DockStyle.Top;
-                _head.Height = 40;
-                _head.BackColor = PanelBg;
-                _head.Paint += delegate(object s, PaintEventArgs e)
-                {
-                    using (Pen pen = new Pen(Border, 1))
-                        e.Graphics.DrawLine(pen, 0, _head.Height - 1, _head.Width, _head.Height - 1);
-                    using (SolidBrush b = new SolidBrush(_accent))
-                        e.Graphics.FillRectangle(b, 0, _head.Height - 2, 56, 2);
-                };
-                _head.Resize += delegate { LayoutHead(); };
-
-                _title = new Label();
-                _title.Text = title;
-                _title.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold);
-                _title.ForeColor = TextMain;
-                _title.AutoSize = true;
-                _title.Location = new Point(14, 10);
-                _title.BackColor = Color.Transparent;
-
-                _btnBranch = new RoundedButton("rama ▾", Color.FromArgb(245, 247, 250), TextMain);
-                _btnBranch.Size = new Size(150, 28);
-                _btnBranch.Font = new Font("Segoe UI Semibold", 8.25f, FontStyle.Bold);
-                _btnBranch.Visible = false;
-                _btnBranch.Click += delegate { ShowBranchMenu(); };
-
-                _btnFolder = new RoundedButton("Abrir carpeta", Color.FromArgb(245, 247, 250), TextMain);
-                _btnFolder.Size = new Size(118, 28);
-                _btnFolder.Font = new Font("Segoe UI Semibold", 8.25f, FontStyle.Bold);
-                _btnFolder.Visible = !string.IsNullOrEmpty(folderPath) && Directory.Exists(folderPath);
-                _btnFolder.Click += delegate
-                {
-                    try
-                    {
-                        if (!string.IsNullOrEmpty(_folderPath) && Directory.Exists(_folderPath))
-                            Process.Start("explorer.exe", _folderPath);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show("No se pudo abrir la carpeta:\n" + ex.Message, "AppInWhats DevBuild",
-                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                };
-
-                _head.Controls.Add(_title);
-                _head.Controls.Add(_btnBranch);
-                _head.Controls.Add(_btnFolder);
-
-                _box = new RichTextBox();
-                _box.Dock = DockStyle.Fill;
-                _box.ReadOnly = true;
-                _box.BorderStyle = BorderStyle.None;
-                _box.BackColor = TermBg;
-                _box.ForeColor = TermFg;
-                _box.Font = new Font("Cascadia Mono", 9f);
-                if (_box.Font.Name != "Cascadia Mono")
-                    _box.Font = new Font("Consolas", 9f);
-                _box.WordWrap = true;
-                _box.DetectUrls = false;
-                _box.ScrollBars = RichTextBoxScrollBars.Vertical;
-                _box.HideSelection = false;
-
-                Controls.Add(_box);
-                Controls.Add(_head);
-                LayoutHead();
-                RefreshGitBranch();
-            }
-
-            void LayoutHead()
-            {
-                if (_btnFolder == null || _head == null) return;
-                _btnFolder.Location = new Point(_head.Width - _btnFolder.Width - 12, 6);
-                if (_btnBranch != null && _btnBranch.Visible)
-                    _btnBranch.Location = new Point(_btnFolder.Left - _btnBranch.Width - 8, 6);
-                _btnFolder.BringToFront();
-                if (_btnBranch != null) _btnBranch.BringToFront();
-            }
-
-            public void SetTitle(string title)
-            {
-                _title.Text = title;
-            }
-
             public void RefreshGitBranch()
             {
                 _gitReady = IsGitRepo(_folderPath);
@@ -3389,10 +2404,10 @@ namespace AppInWhats
 
                 string branch = GetCurrentBranch(_folderPath);
                 _currentBranch = branch ?? "";
-                string label = string.IsNullOrEmpty(_currentBranch) ? "rama ▾" : TruncateBranch(_currentBranch) + " ▾";
-                _btnBranch.Text = label;
-                int w = Math.Max(120, TextRenderer.MeasureText(label, _btnBranch.Font).Width + 24);
-                _btnBranch.Size = new Size(Math.Min(220, w), 28);
+                _btnBranch.Text = string.IsNullOrEmpty(_currentBranch) ? "rama" : TruncateBranch(_currentBranch);
+                _btnBranch.AutoWidth();
+                if (_btnBranch.Width > 240) _btnBranch.Width = 240;
+                FluentUi.Tip(_btnBranch, "Rama actual: " + (_currentBranch.Length > 0 ? _currentBranch : "—") + " · clic para cambiar");
                 LayoutHead();
             }
 
@@ -3417,11 +2432,9 @@ namespace AppInWhats
                     Cursor = Cursors.Default;
                 }
 
-                ContextMenuStrip menu = new ContextMenuStrip();
-                menu.Font = new Font("Segoe UI", 9f);
-                menu.ShowImageMargin = false;
+                ContextMenuStrip menu = FluentMenu.Create();
 
-                ToolStripMenuItem refreshItem = new ToolStripMenuItem("↻ Actualizar ramas (fetch)");
+                ToolStripMenuItem refreshItem = new ToolStripMenuItem("Actualizar ramas (fetch)");
                 refreshItem.Click += delegate
                 {
                     Append("\r\n── git fetch --all --prune ──\r\n", Accent);
@@ -3468,9 +2481,7 @@ namespace AppInWhats
             void ShowRemoteBranchesMenu()
             {
                 List<string> remotes = ListRemoteBranches(_folderPath);
-                ContextMenuStrip menu = new ContextMenuStrip();
-                menu.Font = new Font("Segoe UI", 9f);
-                menu.ShowImageMargin = false;
+                ContextMenuStrip menu = FluentMenu.Create();
 
                 if (remotes.Count == 0)
                 {
@@ -3696,185 +2707,5 @@ namespace AppInWhats
             }
         }
 
-        [DllImport("gdi32.dll", SetLastError = true)]
-        static extern IntPtr CreateRoundRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidthEllipse, int nHeightEllipse);
-
-        [DllImport("gdi32.dll", SetLastError = true)]
-        static extern bool DeleteObject(IntPtr hObject);
-
-        [DllImport("dwmapi.dll")]
-        static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
-
-        sealed class RoundedButton : Control
-        {
-            Color _bg;
-            Color _fg;
-            bool _hover;
-            bool _pressed;
-            const int Radius = 10;
-
-            public RoundedButton(string text, Color bg, Color fg)
-            {
-                Text = text;
-                _bg = bg;
-                _fg = fg;
-                Cursor = Cursors.Hand;
-                Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-                Size = new Size(118, 34);
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
-                BackColor = Color.Transparent;
-
-                MouseEnter += delegate { _hover = true; Invalidate(); };
-                MouseLeave += delegate { _hover = false; _pressed = false; Invalidate(); };
-                MouseDown += delegate { _pressed = true; Invalidate(); };
-                MouseUp += delegate { _pressed = false; Invalidate(); };
-            }
-
-            public override Font Font
-            {
-                get { return base.Font; }
-                set { base.Font = value; Invalidate(); }
-            }
-
-            protected override void OnEnabledChanged(EventArgs e)
-            {
-                base.OnEnabledChanged(e);
-                Invalidate();
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                Color parentBg = Parent != null ? Parent.BackColor : Color.White;
-                g.Clear(parentBg);
-
-                Rectangle face = new Rectangle(0, 0, Width - 1, Height - 1);
-
-                Color fill = _bg;
-                Color border = Color.FromArgb(220, Border);
-                if (!Enabled)
-                {
-                    fill = Color.FromArgb(236, 238, 242);
-                    border = Color.FromArgb(228, 230, 234);
-                }
-                else if (_pressed)
-                {
-                    fill = ControlPaint.Dark(_bg, 0.06f);
-                }
-                else if (_hover)
-                {
-                    // elevación sutil: un poco más claro + borde más marcado
-                    fill = ControlPaint.Light(_bg, 0.08f);
-                    border = Color.FromArgb(180, _bg.R > 200 ? 160 : _bg.R, _bg.G > 200 ? 160 : _bg.G, _bg.B > 200 ? 170 : _bg.B);
-                    using (GraphicsPath sp = RoundRect(new Rectangle(1, 2, Width - 3, Height - 2), Radius))
-                    using (SolidBrush sb = new SolidBrush(Color.FromArgb(28, 0, 0, 0)))
-                        g.FillPath(sb, sp);
-                }
-
-                using (GraphicsPath path = RoundRect(face, Radius))
-                using (SolidBrush brush = new SolidBrush(fill))
-                using (Pen pen = new Pen(border, 1f))
-                {
-                    g.FillPath(brush, path);
-                    g.DrawPath(pen, path);
-                }
-
-                // acento inferior fino si es botón primario (fondo oscuro/saturado)
-                if (Enabled && _bg.GetBrightness() < 0.65f)
-                {
-                    using (SolidBrush ab = new SolidBrush(Color.FromArgb(60, 255, 255, 255)))
-                        g.FillRectangle(ab, 8, 1, Width - 16, 1);
-                }
-
-                Color text = Enabled ? _fg : Color.FromArgb(160, 166, 176);
-                TextRenderer.DrawText(
-                    g,
-                    Text,
-                    Font,
-                    ClientRectangle,
-                    text,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-            }
-        }
-
-        enum CaptionKind
-        {
-            Minimize,
-            Maximize,
-            Close
-        }
-
-        sealed class CaptionButton : Panel
-        {
-            readonly CaptionKind _kind;
-            readonly Action _action;
-            bool _hover;
-
-            public bool IsRestored;
-
-            public CaptionButton(CaptionKind kind, Action action)
-            {
-                _kind = kind;
-                _action = action;
-                BackColor = TitleBar;
-                Cursor = Cursors.Hand;
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-
-                MouseEnter += delegate { _hover = true; Invalidate(); };
-                MouseLeave += delegate { _hover = false; Invalidate(); };
-                Click += delegate { _action(); };
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(TitleBar);
-
-                if (_hover)
-                {
-                    Color bg = _kind == CaptionKind.Close ? CloseHover : CaptionHover;
-                    Rectangle rr = new Rectangle(4, 6, Width - 8, Height - 12);
-                    using (GraphicsPath path = RoundRect(rr, 8))
-                    using (SolidBrush b = new SolidBrush(bg))
-                        g.FillPath(b, path);
-                }
-
-                Color icon = (_hover && _kind == CaptionKind.Close) ? Color.White : TextMain;
-                using (Pen pen = new Pen(icon, 1.2f))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    int cx = Width / 2;
-                    int cy = Height / 2;
-
-                    if (_kind == CaptionKind.Minimize)
-                    {
-                        g.DrawLine(pen, cx - 5, cy, cx + 5, cy);
-                    }
-                    else if (_kind == CaptionKind.Maximize)
-                    {
-                        if (IsRestored)
-                        {
-                            // restore: two overlapping squares
-                            g.DrawRectangle(pen, cx - 3, cy - 5, 8, 8);
-                            g.DrawLine(pen, cx - 5, cy - 2, cx - 5, cy + 5);
-                            g.DrawLine(pen, cx - 5, cy + 5, cx + 2, cy + 5);
-                            g.DrawLine(pen, cx - 5, cy - 2, cx - 2, cy - 2);
-                        }
-                        else
-                        {
-                            g.DrawRectangle(pen, cx - 5, cy - 5, 10, 10);
-                        }
-                    }
-                    else
-                    {
-                        g.DrawLine(pen, cx - 5, cy - 5, cx + 5, cy + 5);
-                        g.DrawLine(pen, cx + 5, cy - 5, cx - 5, cy + 5);
-                    }
-                }
-            }
-        }
     }
 }

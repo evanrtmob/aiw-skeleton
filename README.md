@@ -5,7 +5,7 @@
 
 AppInWhats is a B2B sales management platform built around WhatsApp integration. It manages agents, clients, orders, products, conversations, and a public web catalog with an AI chat module.
 
-**Stack:** Angular 16 · Express/TypeScript · MySQL · Nginx · Docker
+**Stack:** Angular 22 · NestJS/TypeScript · MySQL · Nginx · Docker
 
 ---
 
@@ -73,7 +73,7 @@ El launcher integra las terminales (frontend / backend en paneles) y el botón *
 | App (via Nginx) | `http://localhost:50080` | Always use this — it's the main entry point |
 | Backend (direct) | `http://localhost:53000` | Local mode only, useful for Postman/debug |
 
-**Hot reload** works for both frontend (`frontend/src/`) and backend (`backend/scr/`). The `CHOKIDAR_USEPOLLING=true` environment variable set in `docker-compose.override.yml` is what makes this work on Windows — without it, the Docker container can't detect file changes from the Windows host filesystem. Save a file and the container reloads automatically — no host-side compilation needed.
+**Hot reload** works for both frontend (`frontend/src/`) and backend (`backend/src/`). The `CHOKIDAR_USEPOLLING=true` environment variable set in `docker-compose.override.yml` is what makes this work on Windows — without it, the Docker container can't detect file changes from the Windows host filesystem. Save a file and the container reloads automatically — no host-side compilation needed.
 
 ---
 
@@ -112,17 +112,17 @@ nginx:50080
 | `docker-compose.remote.yml` | Swaps Nginx config for remote mode |
 | `docker-compose.prod.yml` | Production image overrides |
 
-### Backend (`backend/scr/`)
+### Backend (`backend/src/`)
 
-Express server — pattern: **routes → controllers → services → db**
+NestJS server — pattern: **modules → controllers → services → db**
 
-- `db/connection.ts` — mysql2 connection pool
+- `database/` / `db/pool.ts` — pool mysql2 (DI + legacy)
 - `keys.ts` — reads DB credentials from `backend/config.cfg` (not from env vars)
-- `models/server.ts` — bootstrap, CORS config, route registration
+- `main.ts` — bootstrap NestJS, compression, rawBody for payment webhooks
 
 ### Frontend (`frontend/src/app/`)
 
-Angular 16 SPA with lazy-loaded modules:
+Angular 22 SPA with lazy-loaded modules:
 
 | Module | Route |
 |---|---|

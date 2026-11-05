@@ -127,18 +127,19 @@ try {
             Write-Host ""
         }
 
-        $envFile = Join-Path $BackendDir "scr\.env"
+        $envFile = Join-Path $BackendDir "src\.env"
         if (-not (Test-Path $envFile)) {
-            Write-Host "AVISO: no existe backend/scr/.env (SECRET_KEY / JWT). El login puede fallar." -ForegroundColor Yellow
+            Write-Host "AVISO: no existe backend/src/.env (SECRET_KEY / JWT). El login puede fallar." -ForegroundColor Yellow
             Write-Host ""
         }
 
-        Write-Host "Arrancando backend en :3001 ..." -ForegroundColor Green
-        [void](Start-NativeProcess -WorkDir $BackendDir -FilePath $npxPath -Arguments @(
-            "--yes", "nodemon",
-            "--watch", "scr",
-            "--ext", "ts",
-            "--exec", "npx --yes ts-node scr/index.ts"
+        $npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue)
+        if (-not $npmCmd) { $npmCmd = Get-Command npm }
+        $npmPath = $npmCmd.Source
+
+        Write-Host "Arrancando backend NestJS en :3001 (nest start --watch) ..." -ForegroundColor Green
+        [void](Start-NativeProcess -WorkDir $BackendDir -FilePath $npmPath -Arguments @(
+            "run", "start:dev"
         ) -EnvVars @{
             AIW_CONFIG_CFG = $cfgPath
             PORT = "3001"

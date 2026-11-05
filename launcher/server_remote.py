@@ -45,7 +45,7 @@ def load_config():
             "Falta launcher/server.config.json.\n"
             "Copia server.config.example.json y rellena host/usuario/password."
         )
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
         cfg = json.load(f)
     for key in ("host", "user", "password", "remoteRoot"):
         if not cfg.get(key):
@@ -468,13 +468,122 @@ def action_status(cfg):
         client.close()
 
 
+PLESK_CONFIG_PATH = os.path.join(HERE, "plesk.config.json")
+
+
+def load_plesk_config():
+    if not os.path.isfile(PLESK_CONFIG_PATH):
+        example = os.path.join(HERE, "plesk.config.example.json")
+        raise SystemExit(
+            "Falta launcher/plesk.config.json.\n"
+            "Copia plesk.config.example.json y rellena host/usuario/password/remotePath."
+        )
+    with open(PLESK_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+        cfg = json.load(f)
+    for key in ("host", "user", "password", "remotePath"):
+        if not cfg.get(key) or not str(cfg.get(key)).strip():
+            raise SystemExit("Config Plesk incompleta: falta '%s'" % key)
+    if str(cfg.get("password", "")).strip() in ("TU_PASSWORD_AQUI", "changeme"):
+        raise SystemExit("Config Plesk: cambia el password en plesk.config.json")
+    if "TU_DOMINIO" in str(cfg.get("remotePath", "")):
+        raise SystemExit(
+            "Config Plesk: pon el document root real en remotePath\n"
+            "(ej. /var/www/vhosts/tudominio.com/httpdocs)"
+        )
+    cfg.setdefault("port", 22)
+    return cfg
+
+
+def find_local_dist():
+    candidates = [
+        os.path.join(ROOT, "frontend", "dist", "AiW"),
+        os.path.join(ROOT, "frontend", "dist"),
+    ]
+    for path in candidates:
+        if os.path.isdir(path) and os.path.isfile(os.path.join(path, "index.html")):
+            return path
+    raise SystemExit(
+        "No se encontró frontend/dist/AiW (con index.html).\n"
+        "Compila antes: ng build --configuration=production"
+    )
+
+
+def make_dist_tarball(local_dir):
+    fd, path = tempfile.mkstemp(prefix="aiw-plesk-front-", suffix=".tar.gz")
+    os.close(fd)
+    count = [0]
+
+    def filter_tar(tarinfo):
+        name = os.path.basename(tarinfo.name)
+        if name in (".DS_Store", "Thumbs.db"):
+            return None
+        count[0] += 1
+        return tarinfo
+
+    with tarfile.open(path, "w:gz") as tar:
+        for entry in os.listdir(local_dir):
+            full = os.path.join(local_dir, entry)
+            tar.add(full, arcname=entry, filter=filter_tar)
+    size_mb = os.path.getsize(path) / (1024.0 * 1024.0)
+    log("Paquete dist: %.1f MB (%s entradas)" % (size_mb, count[0]))
+    return path
+
+
+def action_upload_plesk_front():
+    """Sube frontend/dist/AiW al document root de Plesk vía SFTP/SSH."""
+    cfg = load_plesk_config()
+    dist = find_local_dist()
+    remote = cfg["remotePath"].rstrip("/")
+    log("Dist local: %s" % dist)
+    log("Destino Plesk: %s@%s:%s → %s" % (cfg["user"], cfg["host"], cfg.get("port", 22), remote))
+
+    tarball = make_dist_tarball(dist)
+    remote_tar = "/tmp/aiw-plesk-front.tar.gz"
+    client = connect(cfg, prefer_key=False)
+    try:
+        run(client, "mkdir -p '%s'" % remote)
+        sftp_put(client, tarball, remote_tar)
+        # Limpia contenidos previos (preserva carpetas típicas de Plesk) y extrae el build
+        clean = (
+            "cd '%s' && "
+            "find . -mindepth 1 -maxdepth 1 "
+            "! -name '.well-known' ! -name 'cgi-bin' ! -name '.htaccess' "
+            "-exec rm -rf {} + && "
+            "tar -xzf '%s' -C '%s' && rm -f '%s'"
+        ) % (remote, remote_tar, remote, remote_tar)
+        run(client, clean)
+        run(client, "ls -la '%s' | head -n 30" % remote, check=False)
+        log("Front compilado subido a Plesk: %s" % remote)
+    finally:
+        client.close()
+        try:
+            os.remove(tarball)
+        except Exception:
+            pass
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "action",
-        choices=["bootstrap", "deploy-backend", "deploy-frontend", "deploy-both", "start", "stop", "status"],
+        choices=[
+            "bootstrap",
+            "deploy-backend",
+            "deploy-frontend",
+            "deploy-both",
+            "start",
+            "stop",
+            "status",
+            "upload-plesk-front",
+        ],
     )
     args = parser.parse_args()
+
+    if args.action == "upload-plesk-front":
+        log("Acción: upload-plesk-front")
+        action_upload_plesk_front()
+        return
+
     cfg = load_config()
     log("Servidor %s@%s:%s" % (cfg["user"], cfg["host"], cfg.get("port", 22)))
 

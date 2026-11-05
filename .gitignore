@@ -8,6 +8,7 @@ CLAUDE.md
 GUIA.md
 /docs
 launcher/server.config.json
+launcher/plesk.config.json
 launcher/.aiw_server_key
 launcher/.aiw_server_key.pub
 
